@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>歩行判定デバッグUI</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sanitize.css">
+<style>
+  body {
+    font-family: sans-serif;
+    text-align: center;
+    background: #fafafa;
+    margin: 20px;
+  }
+  #chartContainer {
+    width: 90%;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  #startButton {
+    padding: 10px 20px;
+    font-size: 1.2em;
+    margin-bottom: 15px;
+  }
+  #status {
+    font-size: 1.5em;
+    font-weight: bold;
+    margin: 10px 0;
+  }
+  #cadence {
+    font-size: 1.2em;
+  }
+</style>
+</head>
+<body>
+  <h2>歩行状態デバッグ可視化</h2>
+  <button id="startButton">開始</button>
+  <div id="status">未開始</div>
+  <div>ケイデンス: <span id="cadence">0</span> / min</div>
+
+  <div id="chartContainer">
+    <canvas id="accChart"></canvas>
+  </div>
+
+  <script src="./main.js"></script>
+</body>
+</html>
