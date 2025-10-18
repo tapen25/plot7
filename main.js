@@ -5,10 +5,11 @@ const cadenceDiv = document.getElementById('cadence');
 
 // 定数（チューニング可能）
 const PEAK_THRESHOLD = 1.5;      // 「1歩」として検知する閾値
-const STEP_INTERVAL_MS = 500;    // チャタリング防止　1回の歩行で複数回カウントすることを防ぐ
-const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間　直近何秒間の歩数データを使うか
+const STEP_INTERVAL_MS = 500;    // チャタリング防止
+const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間
 const STILL_THRESHOLD = 30;      // 静止とみなす閾値
-const WALK_THRESHOLD = 130;      // 歩行/速歩の閾値
+const WALK_THRESHOLD = 100;      // ★歩行/早歩きの閾値 (この行を追加)
+const RUN_THRESHOLD = 130;       // ★早歩き/速歩の閾値 (WALK_THRESHOLD から名前変更)
 
 // 状態変数
 let lastPeakTime = 0;
@@ -103,15 +104,19 @@ function handleMotion(event) {
   // 状態判定
   let newState;
   if (cadence < STILL_THRESHOLD) newState = '静止';
-  else if (cadence < WALK_THRESHOLD) newState = '歩行';
-  else newState = '速歩';
+  else if (cadence < WALK_THRESHOLD) newState = '歩行';    // ← 100未満
+  else if (cadence < RUN_THRESHOLD) newState = '早歩き';  // ← ★この行を追加 (100～129)
+  else newState = '速歩';                                 // ← 130以上
 
   if (newState !== currentState) {
     console.log(`State: ${currentState} → ${newState}`);
     currentState = newState;
     statusDiv.textContent = newState;
     statusDiv.style.color =
-      newState === '静止' ? 'gray' : newState === '歩行' ? 'green' : 'red';
+      newState === '静止' ? 'gray' :
+      newState === '歩行' ? 'green' :
+      newState === '早歩き' ? 'orange' : // ★この行を追加
+      'red';
   }
 
   // グラフ更新
