@@ -6,7 +6,7 @@ const cadenceDiv = document.getElementById('cadence');
 // 定数（チューニング可能）
 const PEAK_THRESHOLD = 1.5;      // 「1歩」として検知する閾値
 const STEP_INTERVAL_MS = 500;    // チャタリング防止　1回の歩行で複数回カウントすることを防ぐ
-const HISTORY_SECONDS = 5;       // ケイデンス算出に使う過去時間　直近何秒間の歩数データを使うか
+const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間　直近何秒間の歩数データを使うか
 const STILL_THRESHOLD = 30;      // 静止とみなす閾値
 const WALK_THRESHOLD = 130;      // 歩行/速歩の閾値
 
