@@ -7,9 +7,14 @@ const cadenceDiv = document.getElementById('cadence');
 const PEAK_THRESHOLD = 1.5;      // 「1歩」として検知する閾値
 const STEP_INTERVAL_MS = 500;    // チャタリング防止
 const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間
-const STILL_THRESHOLD = 30;      // 静止とみなす閾値
-const WALK_THRESHOLD = 100;      // ★歩行/早歩きの閾値 (この行を追加)
-const RUN_THRESHOLD = 130;       // ★早歩き/速歩の閾値 (WALK_THRESHOLD から名前変更)
+
+// ★ケイデンス閾値 (音変化用)
+const STATE1_THRESHOLD = 20;  // これ未満: "曲①"
+const STATE2_THRESHOLD = 45;  // これ未満: "遷移処理" (20以上)
+const STATE3_THRESHOLD = 80;  // これ未満: "歩行" (45以上)
+const STATE4_THRESHOLD = 115; // これ未満: "遷移処理" (80以上)
+const STATE5_THRESHOLD = 140; // これ「以下」: "早歩き" (115以上)
+// (140より上は "ランニング" などの別State)
 
 // 状態変数
 let lastPeakTime = 0;
@@ -101,22 +106,33 @@ function handleMotion(event) {
   const cadence = stepHistory.length * (60000 / (HISTORY_SECONDS * 1000));
   cadenceDiv.textContent = Math.round(cadence);
 
-  // 状態判定
+// 状態判定
   let newState;
-  if (cadence < STILL_THRESHOLD) newState = '静止';
-  else if (cadence < WALK_THRESHOLD) newState = '歩行';    // ← 100未満
-  else if (cadence < RUN_THRESHOLD) newState = '早歩き';  // ← ★この行を追加 (100～129)
-  else newState = '速歩';                                 // ← 130以上
+  if (cadence < STATE1_THRESHOLD) {        // 20未満
+    newState = '曲①';
+  } else if (cadence < STATE2_THRESHOLD) { // 20～44
+    newState = '遷移処理';
+  } else if (cadence < STATE3_THRESHOLD) { // 45～79
+    newState = '歩行';
+  } else if (cadence < STATE4_THRESHOLD) { // 80～114
+    newState = '遷移処理';
+  } else if (cadence <= STATE5_THRESHOLD) { // 115～140
+    newState = '早歩き';
+  } else {                                 // 140より上
+    newState = 'ランニング'; // (140を超える場合の仮State)
+  }                                // ← 130以上
 
   if (newState !== currentState) {
     console.log(`State: ${currentState} → ${newState}`);
     currentState = newState;
     statusDiv.textContent = newState;
     statusDiv.style.color =
-      newState === '静止' ? 'gray' :
+      newState === '曲①' ? 'gray' :
+      newState === '遷移処理' ? 'purple' : // 遷移処理用の色
       newState === '歩行' ? 'green' :
-      newState === '早歩き' ? 'orange' : // ★この行を追加
-      'red';
+      newState === '早歩き' ? 'orange' :
+      newState === 'ランニング' ? 'red' :
+      'black'; // デフォルト
   }
 
   // グラフ更新
