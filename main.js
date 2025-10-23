@@ -4,9 +4,9 @@ const statusDiv = document.getElementById('status');
 const cadenceDiv = document.getElementById('cadence');
 
 // 定数（チューニング可能）
-const PEAK_THRESHOLD = 1.5;      // 「1歩」として検知する閾値
-const STEP_INTERVAL_MS = 500;    // チャタリング防止
-const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間
+const PEAK_THRESHOLD = 1.8;      // 「1歩」として検知する閾値 (1.5から上げてノイズを減らす)
+const STEP_INTERVAL_MS = 375;    // チャタリング防止 (500から短くする。これで160bpmまで検出可能)
+const HISTORY_SECONDS = 3;       // ケイデンス算出に使う過去時間 (いったん維持)
 
 // ★ケイデンス閾値 (音変化用)
 const STATE1_THRESHOLD = 20;  // これ未満: "曲①"
@@ -14,7 +14,6 @@ const STATE2_THRESHOLD = 45;  // これ未満: "遷移処理" (20以上)
 const STATE3_THRESHOLD = 80;  // これ未満: "歩行" (45以上)
 const STATE4_THRESHOLD = 115; // これ未満: "遷移処理" (80以上)
 const STATE5_THRESHOLD = 140; // これ「以下」: "早歩き" (115以上)
-// (140より上は "ランニング" などの別State)
 
 // 状態変数
 let lastPeakTime = 0;
