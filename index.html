@@ -1,48 +1,418 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>歩行判定デバッグUI</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sanitize.css">
-<style>
-  body {
-    font-family: sans-serif;
-    text-align: center;
-    background: #fafafa;
-    margin: 20px;
-  }
-  #chartContainer {
-    width: 90%;
-    max-width: 600px;
-    margin: 0 auto;
-  }
-  #startButton {
-    padding: 10px 20px;
-    font-size: 1.2em;
-    margin-bottom: 15px;
-  }
-  #status {
-    font-size: 1.5em;
-    font-weight: bold;
-    margin: 10px 0;
-  }
-  #cadence {
-    font-size: 1.2em;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motion Story Music</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #eee;
+            text-align: center;
+            padding: 20px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 10px; }
+        p { color: #aaa; font-size: 0.9rem; }
+
+        #startBtn {
+            padding: 20px 50px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #00d1b2, #009e86);
+            border: none;
+            color: #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,209,178,0.4);
+            margin: 30px 0;
+            transition: transform 0.1s;
+        }
+        #startBtn:active { transform: scale(0.95); }
+
+        /* ステータス表示エリア */
+        .status-box {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 350px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        .val { font-family: monospace; color: #00d1b2; font-weight: bold; }
+
+        /* シーン表示（ストーリー進行） */
+        .scene-container {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #444;
+        }
+        #sceneName {
+            font-size: 1.3rem;
+            color: #ffcc00;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        #sceneDesc { font-size: 0.8rem; color: #888; }
+        
+        /* プログレスバー */
+        .progress-bg {
+            background: #444;
+            height: 6px;
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        #progressBar {
+            background: #ffcc00;
+            width: 0%;
+            height: 100%;
+            transition: width 0.2s;
+        }
+        
+        #sensorState { font-size: 0.75rem; color: #666; margin-top: 15px; }
+    </style>
 </head>
 <body>
-  <h2>歩行状態可視化</h2>
-  <button id="startButton">開始</button>
-  <div id="status">未開始</div>
-  <div>ケイデンス: <span id="cadence">0</span> / min</div>
 
-  <div id="chartContainer">
-    <canvas id="accChart"></canvas>
-  </div>
+    <h1>Motion Story Music</h1>
+    <p>歩くことで物語が進む音楽生成</p>
 
-  <script src="./main.js"></script>
+    <button id="startBtn">START (Tap Here)</button>
+    
+    <div class="status-box">
+        <div class="metric">
+            <span>Instant Activity</span>
+            <span id="actVal" class="val">0.00</span>
+        </div>
+        <div class="metric">
+            <span>Tempo (BPM)</span>
+            <span id="bpmVal" class="val">90</span>
+        </div>
+
+        <div class="scene-container">
+            <div id="sceneName">Scene 1: Intro</div>
+            <div id="sceneDesc">朝の散歩 - 穏やかな始まり</div>
+            <div class="progress-bg">
+                <div id="progressBar"></div>
+            </div>
+            <div style="font-size:0.7rem; text-align:right; margin-top:4px; color:#aaa;">
+                Score: <span id="totalScore">0</span>
+            </div>
+        </div>
+    </div>
+    
+    <div id="sensorState">センサー待機中...</div>
+
+<script>
+// ==========================================
+// 1. 設定: ストーリー（シーン）の定義
+// ==========================================
+// ここが「水平方向のバリエーション」を司る部分です
+const sceneConfig = [
+    {
+        id: 0,
+        name: "Scene 1: Morning Walk",
+        desc: "穏やかな始まり (C Major Pentatonic)",
+        threshold: 0, // 開始地点
+        // Cメジャーペンタトニック (優しく、外さない音階)
+        scale: ["C4","D4","E4","G4","A4", "C5"], 
+        // シンプルなダイアトニックコード
+        chords: [["C3","E3","G3"], ["F3","A3","C4"], ["C3","E3","G3"], ["G3","B3","D4"]] 
+    },
+    {
+        id: 1,
+        name: "Scene 2: City Stroll",
+        desc: "活発な街歩き (Add 7th / Complex)",
+        threshold: 600, // ある程度歩くと到達 (デモ用に小さめの値)
+        // 音数が増え、少しおしゃれな響きに
+        scale: ["C4","D4","E4","F4","G4","A4","B4", "C5", "D5"],
+        // 7thコードやマイナーコードを含めた展開
+        chords: [["C3","E3","G3","B3"], ["A2","C3","E3","G3"], ["F2","A2","C3","E3"], ["G2","B2","D3","F3"]]
+    },
+    {
+        id: 2,
+        name: "Scene 3: Running High",
+        desc: "高揚と転調 (Modulation to D)",
+        threshold: 1800, // さらに歩くと到達
+        // キーをDメジャーに転調（全音上げ）して高揚感を出す
+        scale: ["D4","E4","F#4","G4","A4","B4","C#5", "D5"],
+        // 力強い進行
+        chords: [["D3","F#3","A3"], ["B2","D3","F#3"], ["G2","B2","D3"], ["A2","C#3","E3"]]
+    }
+];
+
+// ==========================================
+// 2. 変数定義
+// ==========================================
+const DURATION = 2000; 
+const motionBuffer = [];
+let targetActivity = 0.0; // 瞬間の激しさ
+let activity = 0.0;       // スムーズな激しさ
+let accumulatedActivity = 0.0; // 累積運動量（ストーリー進行度）
+let smoothedVariance = 0.0;
+let currentSceneIndex = 0;
+
+let tickCounter = 0;
+let prevNote = "C4";
+let motionListenerAttached = false;
+
+// ==========================================
+// 3. Tone.js シンセ設定
+// ==========================================
+let chordSynth, melodySynth, kick, snare, hihat;
+
+function setupSynths() {
+    // コード: 空間的な広がり
+    chordSynth = new Tone.PolySynth(Tone.Synth, {
+        volume: -8,
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.2, decay: 0.5, sustain: 0.4, release: 2 }
+    }).toDestination();
+
+    // メロディ: 芯のある音
+    melodySynth = new Tone.Synth({
+        volume: -6,
+        oscillator: { type: "fmsine", modulationType: "square", modulationIndex: 3 },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 1 }
+    }).toDestination();
+
+    // ドラム
+    kick = new Tone.MembraneSynth({ volume: -6 }).toDestination();
+    snare = new Tone.NoiseSynth({ volume: -10, envelope: { decay: 0.2 } }).toDestination();
+    hihat = new Tone.MetalSynth({ volume: -14, frequency: 200, envelope: { decay: 0.05 }, harmonicity: 5.1 }).toDestination();
+}
+
+// ==========================================
+// 4. 音楽生成ロジック
+// ==========================================
+
+// 次の音を決める（現在のシーンのスケールから選ぶ）
+function nextNote(prev, candidates) {
+    const bias = 1 + activity * 10; 
+    let best = candidates[0];
+    let bestScore = 999;
+
+    for (const n of candidates) {
+        const midiPrev = Tone.Frequency(prev).toMidi();
+        const midiN = Tone.Frequency(n).toMidi();
+        const score = Math.abs(Math.abs(midiN - midiPrev) - bias);
+        if (score < bestScore) {
+            bestScore = score;
+            best = n;
+        }
+    }
+    return best;
+}
+
+function startMusicLoop() {
+    Tone.Transport.bpm.value = 90;
+
+    // --- A. コード進行 (シーン依存) ---
+    Tone.Transport.scheduleRepeat((time) => {
+        const scene = sceneConfig[currentSceneIndex];
+        // 4小節ループとして扱う
+        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 4);
+        // シーン定義のコード配列から取得（配列長を超えないようにケア）
+        const chord = scene.chords[bar % scene.chords.length];
+        
+        chordSynth.triggerAttackRelease(chord, "1n", time);
+    }, "1n");
+
+    // --- B. メロディ (シーン依存 + 激しさ依存) ---
+    Tone.Transport.scheduleRepeat((time) => {
+        const scene = sceneConfig[currentSceneIndex];
+
+        // 激しさ(activity)が高いと音符が細かくなる
+        let step = (activity < 0.3) ? 4 : (activity > 0.7 ? 1 : 2);
+        const duration = (step >= 4) ? "4n" : "8n";
+        const probability = (activity > 0.8) ? 0.9 : 0.7;
+
+        if (tickCounter % step === 0) {
+             if (Math.random() < probability) {
+                // 現在のシーンのスケールを渡す
+                const next = nextNote(prevNote, scene.scale);
+                melodySynth.triggerAttackRelease(next, duration, time);
+                prevNote = next;
+            }
+        }
+        tickCounter++;
+    }, "16n");
+
+    // --- C. ドラム (激しさ依存) ---
+    // ドラムは「足音」のメタファーなので、シーンよりも「今の速度」に追従させる
+    Tone.Transport.scheduleRepeat((time) => {
+        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
+        let k=false, n=false, h=false;
+
+        if (activity < 0.3) { // 静
+            if (s % 4 === 0) k = true;
+            if (s % 4 === 2) h = true;
+        } else if (activity < 0.7) { // 中
+            if (s % 4 === 0) k = true;
+            if (s % 8 === 4) n = true;
+            if (s % 2 === 0) h = true;
+        } else { // 激
+            if (s % 4 === 0) k = true;
+            if (s % 4 === 2) n = true; 
+            h = true; 
+            if (s % 16 === 14 || s % 16 === 15) n = true; // フィルイン的連打
+        }
+        
+        if (k) kick.triggerAttackRelease("C1", "8n", time);
+        if (n) snare.triggerAttackRelease("8n", time);
+        if (h) hihat.triggerAttackRelease("32n", time);
+    }, "16n");
+
+    Tone.Transport.start();
+}
+
+// ==========================================
+// 5. センサー処理 (標準偏差 + 累積)
+// ==========================================
+function handleMotion(event) {
+    const a = event.accelerationIncludingGravity;
+    if (!a) return;
+
+    const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    const now = Date.now();
+
+    motionBuffer.push({ t: now, m: mag });
+
+    while (motionBuffer.length > 0 && motionBuffer[0].t < now - DURATION) {
+        motionBuffer.shift();
+    }
+
+    if (motionBuffer.length < 10) {
+        targetActivity = 0.0;
+        return;
+    }
+
+    // 標準偏差計算
+    const magnitudes = motionBuffer.map(d => d.m);
+    const mean = magnitudes.reduce((s, v) => s + v, 0) / magnitudes.length;
+    const variance = magnitudes.reduce((s, v) => s + (v - mean) ** 2, 0) / magnitudes.length;
+    const stdDev = Math.sqrt(variance);
+
+    // 垂直方向（今の激しさ）の正規化 (Max 8.0と仮定)
+    targetActivity = Math.min(stdDev / 8.0, 1.0);
+    smoothedVariance = smoothedVariance * 0.9 + stdDev * 0.1;
+
+    // 水平方向（累積）の加算
+    // ある程度動きがある時だけカウント（ノイズ除け）
+    if (stdDev > 0.5) {
+        // スコアの加算ペース調整
+        accumulatedActivity += stdDev * 0.1;
+    }
+
+    // シーン遷移チェック
+    if (currentSceneIndex < sceneConfig.length - 1) {
+        const nextSceneThreshold = sceneConfig[currentSceneIndex + 1].threshold;
+        if (accumulatedActivity >= nextSceneThreshold) {
+            currentSceneIndex++;
+            console.log("Scene Changed:", sceneConfig[currentSceneIndex].name);
+            // 効果音などを入れても良い
+        }
+    }
+}
+
+// ==========================================
+// 6. 画面更新ループ
+// ==========================================
+function updateLoop() {
+    // Activityの補間
+    activity += (targetActivity - activity) * 0.05;
+
+    // 数値表示
+    document.getElementById('actVal').innerText = activity.toFixed(2);
+    
+    // BPM更新 (動きに合わせてテンポアップ)
+    let targetBpm = 90 + (smoothedVariance * 8);
+    if(targetBpm > 160) targetBpm = 160; // 上限
+    Tone.Transport.bpm.rampTo(targetBpm, 0.5);
+    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
+
+    // シーン情報の表示更新
+    const currentScene = sceneConfig[currentSceneIndex];
+    const nextScene = sceneConfig[currentSceneIndex + 1];
+
+    document.getElementById('sceneName').innerText = currentScene.name;
+    document.getElementById('sceneDesc').innerText = currentScene.desc;
+    document.getElementById('totalScore').innerText = Math.floor(accumulatedActivity);
+
+    // プログレスバーの計算
+    let progressPercent = 0;
+    if (nextScene) {
+        // 現在のシーンの区間内での進行度
+        const prevThreshold = sceneConfig[currentSceneIndex].threshold;
+        const range = nextScene.threshold - prevThreshold;
+        const currentVal = accumulatedActivity - prevThreshold;
+        progressPercent = (currentVal / range) * 100;
+    } else {
+        progressPercent = 100; // 最終シーン到達
+    }
+    document.getElementById('progressBar').style.width = Math.min(progressPercent, 100) + "%";
+
+    requestAnimationFrame(updateLoop);
+}
+
+// ==========================================
+// 7. 初期化 & イベントリスナー (iOS Fix済)
+// ==========================================
+const btn = document.getElementById('startBtn');
+const sensorState = document.getElementById('sensorState');
+
+btn.addEventListener('click', async () => {
+    // 1. まずセンサー許可を求める (iOS対応のため最優先)
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+            const permissionState = await DeviceMotionEvent.requestPermission();
+            if (permissionState === 'granted') {
+                window.addEventListener('devicemotion', handleMotion);
+                motionListenerAttached = true;
+                sensorState.innerText = "センサー接続: iOS (OK)";
+            } else {
+                alert("センサー許可が必要です");
+                return;
+            }
+        } catch (e) {
+            alert("センサーエラー: " + e);
+            return;
+        }
+    } else {
+        // Android / PC
+        window.addEventListener('devicemotion', handleMotion);
+        motionListenerAttached = true;
+        sensorState.innerText = "センサー接続: Android/PC (OK)";
+    }
+
+    // 2. 許可後にオーディオコンテキストを開始
+    await Tone.start();
+    setupSynths();
+
+    // 3. 演奏開始
+    if (motionListenerAttached) {
+        btn.innerText = "Running...";
+        btn.disabled = true;
+        btn.style.background = "#444";
+        btn.style.boxShadow = "none";
+        startMusicLoop();
+        updateLoop();
+    }
+});
+</script>
 </body>
 </html>
