@@ -2,28 +2,292 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Galaxy Music Motion</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Galaxy Motion Music</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background: radial-gradient(circle at center, #1a1c2c, #000);
+            color: #fff;
+            text-align: center;
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        h1 {
+            font-size: 2rem;
+            text-shadow: 0 0 15px #00d2ff;
+            margin-bottom: 10px;
+        }
+
+        /* 揺れを可視化する円 */
+        #visualizer {
+            width: 150px;
+            height: 150px;
+            background: linear-gradient(135deg, #00d2ff, #ff0099);
+            border-radius: 50%;
+            box-shadow: 0 0 30px rgba(0, 210, 255, 0.6);
+            margin: 30px auto;
+            transition: transform 0.1s cubic-bezier(0.1, 0.7, 1.0, 0.1);
+        }
+
+        #startBtn {
+            padding: 15px 40px;
+            font-size: 1.2rem;
+            background: transparent;
+            border: 2px solid #00d2ff;
+            color: #00d2ff;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 20px;
+            z-index: 10;
+        }
+        #startBtn:active { background: #00d2ff; color: #000; }
+
+        .status-panel {
+            margin-top: 20px;
+            font-family: monospace;
+            background: rgba(0,0,0,0.5);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: left;
+            display: inline-block;
+        }
+        .data-row { display: flex; justify-content: space-between; width: 200px; margin-bottom: 5px; }
+        .val { color: #00ffaa; font-weight: bold; }
+    </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>Galaxy Motion</h1>
-        
-        <div class="monitor">
-            <p>Activity: <span id="activity-val">0.00</span></p>
-            <div class="bar-bg">
-                <div id="activity-bar" class="bar-fill"></div>
-            </div>
-        </div>
+    <h1>Galaxy Motion</h1>
+    
+    <div id="visualizer"></div>
 
-        <button id="start-btn">TAP TO START</button>
-        
-        <p class="instruction">スマホを持って<br>ゆっくり動いたり走ったりしてください</p>
+    <div class="status-panel">
+        <div class="data-row">Activity: <span id="actVal" class="val">0.00</span></div>
+        <div class="data-row">BPM: <span id="bpmVal" class="val">--</span></div>
+        <div class="data-row" style="font-size:0.8em; color:#aaa;">Status: <span id="sysStatus">TAP START</span></div>
     </div>
 
-    <script src="script.js"></script>
+    <button id="startBtn">START EXPERIENCE</button>
+
+<script>
+// ==========================================
+// 1. 設定 & 状態変数
+// ==========================================
+const SENSOR_DURATION = 1000; // バッファサイズ(ms)
+const motionBuffer = [];      // センサーデータ履歴
+let targetActivity = 0.0;     // 計算された瞬間の揺れ
+let currentActivity = 0.0;    // 滑らかにした揺れ (0.0 ~ 1.0)
+let smoothedVariance = 0.0;   // BPM制御用
+
+// 音楽制御用
+let isPlaying = false;
+let chordIndex = 0;
+
+// ==========================================
+// 2. 音源設定 (マリオギャラクシー風)
+// ==========================================
+// シンセ: 浮遊感のあるパッド/リード
+const polySynth = new Tone.PolySynth(Tone.Synth, {
+    volume: -8,
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.05, decay: 0.3, sustain: 0.4, release: 1.5 }
+}).toDestination();
+
+// キラキラ音 (活動時に鳴る)
+const glitterSynth = new Tone.PolySynth(Tone.FMSynth, {
+    volume: -10,
+    harmonicity: 3,
+    modulationIndex: 10,
+    envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.5 }
+}).toDestination();
+
+// 空間系エフェクト
+const reverb = new Tone.Reverb({ decay: 4, wet: 0.5 }).toDestination();
+const delay = new Tone.FeedbackDelay("8n.", 0.4).toDestination();
+
+polySynth.connect(reverb);
+glitterSynth.connect(delay);
+glitterSynth.connect(reverb);
+
+// ==========================================
+// 3. 音楽理論 (カノン進行 C Major)
+// ==========================================
+// コード進行
+const chords = [
+    ["C4","E4","G4"], ["G3","B3","D4"], ["A3","C4","E4"], ["E3","G3","B3"],
+    ["F3","A3","C4"], ["C4","E4","G4"], ["F3","A3","C4"], ["G3","B3","D4"]
+];
+
+// ペンタトニックスケール (メロディ用)
+const scale = ["C4", "D4", "E4", "G4", "A4", "C5", "D5", "E5", "G5"];
+
+// ==========================================
+// 4. メインロジック (センサー & 音楽)
+// ==========================================
+
+// ■ A. センサー処理 (提供されたロジックを採用)
+function handleMotion(event) {
+    const a = event.accelerationIncludingGravity;
+    if (!a) return;
+
+    // 重力込みベクトル
+    const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+    const now = Date.now();
+
+    motionBuffer.push({ t: now, m: mag });
+
+    // 古いデータを捨てる
+    while (motionBuffer.length > 0 && motionBuffer[0].t < now - SENSOR_DURATION) {
+        motionBuffer.shift();
+    }
+
+    if (motionBuffer.length < 5) return;
+
+    // 分散・標準偏差の計算
+    const vals = motionBuffer.map(d => d.m);
+    const mean = vals.reduce((s,v) => s+v, 0) / vals.length;
+    const variance = vals.reduce((s,v) => s + (v-mean)**2, 0) / vals.length;
+    const stdDev = Math.sqrt(variance);
+
+    // 平滑化用
+    smoothedVariance = smoothedVariance * 0.9 + stdDev * 0.1;
+
+    // アクティビティの正規化 (Max 3.0 G程度と仮定)
+    // 0.1はノイズ除去
+    let rawActivity = Math.max(0, stdDev - 0.1) / 3.0;
+    targetActivity = Math.min(rawActivity, 1.0);
+}
+
+// ■ B. 描画 & パラメータ更新ループ
+function updateLoop() {
+    if (!isPlaying) return;
+
+    // 値を滑らかに追従させる
+    currentActivity += (targetActivity - currentActivity) * 0.05;
+
+    // 1. BPM変化: 静止時は90, 激しいと140
+    // smoothedVariance は振ると 1.0~5.0 くらいになる
+    let targetBpm = 90 + (smoothedVariance * 10); 
+    targetBpm = Math.min(Math.max(targetBpm, 60), 160); // 範囲制限
+    Tone.Transport.bpm.rampTo(targetBpm, 0.5);
+
+    // 2. 画面更新
+    document.getElementById('actVal').innerText = currentActivity.toFixed(2);
+    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
+    
+    // 円のサイズ変化
+    const scale = 1 + currentActivity * 0.5;
+    document.getElementById('visualizer').style.transform = `scale(${scale})`;
+    
+    requestAnimationFrame(updateLoop);
+}
+
+// ■ C. 音楽生成ループ
+function startGenerativeMusic() {
+    Tone.Transport.bpm.value = 90;
+
+    // 1. コード進行 (全音符ごとに変化)
+    Tone.Transport.scheduleRepeat((time) => {
+        // 現在のコード
+        const currentChord = chords[chordIndex];
+        
+        // ベース音と構成音を鳴らす
+        polySynth.triggerAttackRelease(currentChord, "1n", time);
+        
+        // コード進行を進める
+        chordIndex = (chordIndex + 1) % chords.length;
+    }, "1n");
+
+    // 2. メロディ/アルペジオ (16分音符で判定)
+    Tone.Transport.scheduleRepeat((time) => {
+        // 活動量が低いときは、確率を下げて「間」を作る
+        // 活動量が高いときは、確率を上げて「連打」させる
+        let probability = 0.1 + (currentActivity * 0.8); 
+        
+        // リズムの間引き (Activityが低いときは8分音符単位にする等)
+        const step = currentActivity < 0.3 ? 4 : 1; // 低:4つ飛ばし, 高:全部
+        const sixteenths = Math.floor(Tone.Transport.position.split(":")[2]); // 現在の16分位置
+        
+        if (sixteenths % step === 0 && Math.random() < probability) {
+            // 現在のコードの構成音 + スケールからランダムに選ぶ
+            const currentChord = chords[chordIndex];
+            const notePool = [...currentChord, ...scale]; // 混ぜる
+            const note = notePool[Math.floor(Math.random() * notePool.length)];
+
+            // 長さ
+            const len = currentActivity > 0.6 ? "16n" : "8n";
+            
+            // 音量 (Activityが高いと強く)
+            const vel = 0.5 + (currentActivity * 0.5);
+
+            // 高活動時はGlitterシンセ、低活動時はPolyシンセで弾く
+            if (currentActivity > 0.5) {
+                glitterSynth.triggerAttackRelease(note, len, time, vel);
+            } else {
+                polySynth.triggerAttackRelease(note, len, time, vel * 0.8);
+            }
+        }
+    }, "16n");
+
+    Tone.Transport.start();
+}
+
+
+// ==========================================
+// 5. 初期化フロー (iOS対応)
+// ==========================================
+const startBtn = document.getElementById('startBtn');
+const sysStatus = document.getElementById('sysStatus');
+
+startBtn.addEventListener('click', async () => {
+    sysStatus.innerText = "Initializing...";
+    
+    // 【重要】iOS 13+ のセンサー許可リクエスト
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+            const permission = await DeviceMotionEvent.requestPermission();
+            if (permission === 'granted') {
+                window.addEventListener('devicemotion', handleMotion);
+                sysStatus.innerText = "Sensor: OK";
+            } else {
+                alert("センサー許可が必要です (iOS)");
+                sysStatus.innerText = "Sensor: Denied";
+                return;
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Sensor Error: " + e);
+        }
+    } else {
+        // Android / PC
+        window.addEventListener('devicemotion', handleMotion);
+        sysStatus.innerText = "Sensor: OK (Android/PC)";
+    }
+
+    // Audio Context 開始
+    await Tone.start();
+    
+    // ループ開始
+    isPlaying = true;
+    startGenerativeMusic();
+    updateLoop();
+
+    // UI変更
+    startBtn.innerText = "RUNNING";
+    startBtn.style.borderColor = "#ff0099";
+    startBtn.style.color = "#ff0099";
+});
+
+</script>
 </body>
 </html>
