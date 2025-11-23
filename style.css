@@ -1,0 +1,68 @@
+body {
+    background-color: #0b0d17; /* 宇宙っぽい濃紺 */
+    color: #ffffff;
+    font-family: sans-serif;
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    overflow: hidden; /* スクロール禁止 */
+}
+
+.container {
+    width: 90%;
+    max-width: 400px;
+}
+
+h1 {
+    font-size: 2rem;
+    text-shadow: 0 0 10px #00d2ff;
+    margin-bottom: 2rem;
+}
+
+.monitor {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 15px;
+    margin-bottom: 30px;
+}
+
+.bar-bg {
+    width: 100%;
+    height: 20px;
+    background: #333;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+.bar-fill {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #00d2ff, #ff0099);
+    transition: width 0.1s ease;
+}
+
+#start-btn {
+    background: linear-gradient(45deg, #00d2ff, #0051ff);
+    border: none;
+    padding: 15px 40px;
+    font-size: 1.2rem;
+    color: white;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 210, 255, 0.5);
+    transition: transform 0.1s;
+}
+
+#start-btn:active {
+    transform: scale(0.95);
+}
+
+.instruction {
+    margin-top: 20px;
+    color: #888;
+    font-size: 0.9rem;
+}
