@@ -1,343 +1,250 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Motion Music - Layered Story</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theory-Based Motion Music</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
-        body { font-family: sans-serif; background: #111; color: #fff; text-align: center; padding: 24px; }
-        h1 { margin-top: 6px; }
-        #startBtn { padding: 14px 28px; font-size: 1.05rem; background: #00d1b2; border: none; color: #fff; border-radius: 8px; cursor: pointer; margin-top: 20px; }
-        #status { margin-top: 22px; font-size: 1rem; line-height: 1.8; color:#ddd;}
-        .data { font-family: monospace; color: #00d1b2; }
-        .note { font-family: monospace; color: #ffd166; }
+        body { font-family: sans-serif; background: #222; color: #fff; text-align: center; padding: 20px; }
+        #startBtn { padding: 20px 40px; font-size: 1.2rem; background: #e91e63; border: none; color: #fff; border-radius: 8px; cursor: pointer; margin-top: 50px; }
+        #status { margin-top: 30px; font-size: 1.2rem; line-height: 1.8; }
+        .label { font-size: 0.8rem; color: #aaa; }
+        .val { font-weight: bold; color: #e91e63; margin-right: 15px; }
     </style>
 </head>
 <body>
-    <h1>Motion Music — Layered Story</h1>
-    <p>スマホを持って開始を押してください。メインの拍は変わらず（静かなら4分、速いと16分）。activity によって背景レイヤーが増え、ストーリーが生まれます。</p>
-    <button id="startBtn">開始 (Tap to Start)</button>
 
+    <h1>Interactive Motion Music</h1>
+    <p>理論適用版：<br>1. 振る瞬間に音が鳴る (Playful)<br>2. 徐々に盛り上がる (Emotional)<br>3. 傾きで雰囲気が変わる (Aleatoric)</p>
+    <button id="startBtn">TAP TO START</button>
+    
     <div id="status">
-        Activity: <span id="actVal" class="data">0.00</span> &nbsp; | &nbsp;
-        BPM: <span id="bpmVal" class="data">90</span> &nbsp; | &nbsp;
-        Layer: <span id="layerVal" class="data">0</span> &nbsp; | &nbsp;
-        Last note: <span id="noteVal" class="note">C4</span>
-        <div style="font-size:0.8rem; color:#888; margin-top:8px;">Sensor: <span id="sensorState">待機中</span></div>
+        <div><span class="label">Intensity (Smooth):</span> <span id="actVal" class="val">0.00</span></div>
+        <div><span class="label">Tilt (Mood):</span> <span id="tiltVal" class="val">Flat</span></div>
+        <div style="margin-top:20px; font-size: 0.9rem; color:#888;">
+            強く振るとステップ音(Playful)<br>
+            傾けるとスケール変化(Aleatoric)
+        </div>
     </div>
 
 <script>
-// ==============================
-// 設定
-// ==============================
-const DURATION = 2000; // バッファ(ms)
-const motionBuffer = []; // {t, m}
-let targetActivity = 0.0, activity = 0.0, smoothedVariance = 0.0;
-let motionListenerAttached = false;
-let tickCounter = 0;
-let prevNote = "C4";
+// ==========================================
+// 1. 変数定義
+// ==========================================
+let activity = 0.0;       // スムーズな活動量 (0.0 - 1.0)
+let targetActivity = 0.0; 
+let tiltY = 0.0;          // スマホの縦の傾き (Gravity Y)
 
-// trend（ストーリー作りに使うがメインの刻みは変えない）
-let prevActivity = 0.0;
-let trend = 0.0;
+// ステップ検出用 (Playful)
+let lastMag = 0;
+let stepCooldown = 0;
 
-// 歩行周期検出用
-let stepHistory = [];
+// データバッファ (Activity計算用)
+const motionBuffer = [];
+const DURATION = 1500; 
 
-// スケールとコード（オリジナルに準拠）
-const chords = [
-  ["C3","E3","G3"], ["B2","D3","G3"], ["A2","C3","E3"], ["G2","B2","E3"],
-  ["F2","A2","C3"], ["E2","G2","C3"], ["F2","A2","C3"], ["G2","B2","D3"]
-];
-const scales = [
-  ["C4","D4","E4","G4","A4"],
-  ["G3","A3","B3","D4","E4"],
-  ["A3","C4","D4","E4","G4"],
-  ["E3","G3","A3","B3","D4"],
-  ["F3","G3","A3","C4","D4"],
-  ["C4","D4","E4","G4","A4"],
-  ["F3","G3","A3","C4","D4"],
-  ["G3","A3","B3","D4","E4"]
-];
+// ==========================================
+// 2. 音響設計 (Vertical Layering)
+// ==========================================
+let chordSynth, stepSynth, arpSynth;
+let drumLow, drumHigh;
+let gainLow, gainHigh, gainArp; // ボリューム制御用ノード
 
-// ==============================
-// Tone.js synths & layers
-// ==============================
-let chordSynth, melodySynth, padSynth, arpeggioSynth, counterSynth;
-let kick, snare, hihat;
-function setupSynths() {
-    // メインコード（柔らかい） — 1つはコード用
+// スケール定義 (Aleatoric: 傾きで切り替え)
+const scaleMajor = ["C4", "D4", "E4", "G4", "A4"];
+const scaleMinor = ["C4", "Eb4", "F4", "G4", "Bb4"];
+let currentScale = scaleMajor;
+
+async function setupSynths() {
+    // --- A. 映画的 (Emotional): レイヤー構造 ---
+    // ドラムを2つのレイヤーに分け、Gainノードで音量管理する
+    gainLow = new Tone.Gain(0).toDestination();
+    gainHigh = new Tone.Gain(0).toDestination();
+    gainArp = new Tone.Gain(0).toDestination();
+
+    // 低エネルギー用ドラム (Kick, Simle Hat)
+    drumLow = new Tone.MembraneSynth({ volume: -6 }).connect(gainLow);
+    
+    // 高エネルギー用ドラム (Snare, Noise)
+    drumHigh = new Tone.NoiseSynth({ volume: -12 }).connect(gainHigh);
+
+    // アルペジオ (活動量で音量が上がる)
+    arpSynth = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 1 }
+    }).connect(gainArp);
+
+    // --- B. 遊び的 (Playful): 1:1の反応 ---
+    // ステップ/アクション用シンセ (直接Destinationへ)
+    stepSynth = new Tone.PolySynth(Tone.Synth, {
+        volume: -8,
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.2 }
+    }).toDestination();
+    
+    // --- C. ベースのコード (環境音的) ---
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -16, oscillator: { type: "triangle" },
-        envelope: { attack: 0.2, decay: 0.3, sustain: 0.8, release: 2 }
+        volume: -15,
+        oscillator: { type: "fatsawtooth" },
+        envelope: { attack: 1, decay: 1, sustain: 1, release: 2 }
     }).toDestination();
-
-    // パッド層（レイヤー1） — 長めの和音
-    padSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -20, oscillator: { type: "sine" },
-        envelope: { attack: 1.2, decay: 0.5, sustain: 0.8, release: 3 }
-    }).toDestination();
-
-    // アルペジオ層（レイヤー2） — 分散和音
-    arpeggioSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -18, oscillator: { type: "triangle" },
-        envelope: { attack: 0.02, decay: 0.2, sustain: 0.6, release: 0.7 }
-    }).toDestination();
-
-    // メインメロディ（はっきり）
-    melodySynth = new Tone.Synth({
-        volume: -8, oscillator: { type: "sine" },
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.8 }
-    }).toDestination();
-
-    // カウンターメロディ（レイヤー4）
-    counterSynth = new Tone.Synth({
-        volume: -14, oscillator: { type: "sawtooth" },
-        envelope: { attack: 0.01, decay: 0.15, sustain: 0.4, release: 0.6 }
-    }).toDestination();
-
-    // ドラム（簡易）
-    kick = new Tone.MembraneSynth({ volume: -8 }).toDestination();
-    snare = new Tone.NoiseSynth({ volume: -16, envelope: { decay: 0.18 } }).toDestination();
-    hihat = new Tone.MetalSynth({ volume: -18, frequency: 200, envelope: { decay: 0.08 }, harmonicity: 5.1 }).toDestination();
-
-    // 最初は全レイヤーをフェードダウンしておく
-    padSynth.volume.value = -100;
-    arpeggioSynth.volume.value = -100;
-    counterSynth.volume.value = -100;
-    kick.volume.value = -100;
-    snare.volume.value = -100;
-    hihat.volume.value = -100;
 }
 
-// ==============================
-// レイヤー選択（activity→レイヤー数）
-// ==============================
-function selectLayers(a) {
-    if (a < 0.2) return 1;   // pad only
-    if (a < 0.4) return 2;   // pad + arpeggio
-    if (a < 0.6) return 3;   // + rhythm
-    if (a < 0.8) return 4;   // + counter
-    return 5;                // + sparkle
-}
-
-// ==============================
-// 次の音選び（簡潔版）
-// ==============================
-function nextNoteSimple(prev, candidates, trend) {
-    const midiPrev = Tone.Frequency(prev).toMidi();
-    // 跳躍は activity による（大きめの跳躍を許容）
-    const targetJump = 1 + activity * 8;
-    let best = candidates[0], bestScore = 1e9;
-    for (const n of candidates) {
-        const midiN = Tone.Frequency(n).toMidi();
-        let score = Math.abs(Math.abs(midiN - midiPrev) - targetJump);
-        // trend があれば上行/下行を少し優遇
-        if (trend > 0.02 && midiN < midiPrev) score += 6;
-        if (trend < -0.02 && midiN > midiPrev) score += 6;
-        if (score < bestScore) { bestScore = score; best = n; }
-    }
-    return best;
-}
-
-// ==============================
-// 音楽ループ（メイン + 各レイヤー）
-// ==============================
+// ==========================================
+// 3. ループ処理
+// ==========================================
 function startMusicLoop() {
-    // 初期BPM
-    Tone.Transport.bpm.value = 90;
+    Tone.Transport.bpm.value = 100;
 
-    // メイン（16分刻みで走らせ、activityによって4分相当にする）
+    // --- ドラムループ (常に回っているが音量が変化する) ---
+    const loop = new Tone.Loop((time) => {
+        // 16分音符のカウント
+        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
+
+        // Low Layer: 4つ打ちキック (心臓の鼓動的な役割)
+        if (s % 4 === 0) drumLow.triggerAttackRelease("C1", "8n", time);
+
+        // High Layer: 裏打ちハイハット & スネア (テンション)
+        if (s % 2 !== 0) drumHigh.triggerAttackRelease("32n", time); // Hihat
+        if (s % 8 === 4) drumHigh.triggerAttackRelease("16n", time); // Snare like noise
+    }, "16n").start(0);
+
+    // --- アルペジオ (背景) ---
     Tone.Transport.scheduleRepeat((time) => {
-        // mainStep: activity が低ければ 4分相当（16n の4回に1回）
-        const mainStep = (activity < 0.5) ? 4 : 1;
-        const duration = (mainStep === 4) ? "4n" : "16n";
-
-        if (tickCounter % mainStep === 0) {
-            const currentBar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-            const next = nextNoteSimple(prevNote, scales[currentBar], trend);
-            melodySynth.triggerAttackRelease(next, duration, time);
-            prevNote = next;
-            document.getElementById('noteVal').innerText = next;
-        }
-        tickCounter++;
-    }, "16n");
-
-    // コード（1小節ごと）
-    Tone.Transport.scheduleRepeat((time) => {
-        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        chordSynth.triggerAttackRelease(chords[bar], "1n", time);
-    }, "1n");
-
-    // パッド（layer >=1）: 長く鳴らす和音（ただし音量はレイヤー数で制御）
-    Tone.Transport.scheduleRepeat((time) => {
-        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        // pad の発音はコードに合わせる
-        padSynth.triggerAttackRelease(chords[bar], "2n", time);
-    }, "1n");
-
-    // アルペジオ（layer >=2）: 8分で分散して鳴らす
-    Tone.Transport.scheduleRepeat((time) => {
-        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        const notes = chords[bar];
-        // simple arpeggio: pick one note based on tick
-        const idx = (Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 8)) ) % notes.length;
-        arpeggioSynth.triggerAttackRelease(notes[idx], "8n", time);
+        // 現在の傾きに応じたスケールからランダム選出
+        const note = currentScale[Math.floor(Math.random() * currentScale.length)];
+        arpSynth.triggerAttackRelease(note, "16n", time);
     }, "8n");
 
-    // リズム（layer >=3）: 16分でキック/hat/snare制御
+    // --- アンビエントコード (長周期) ---
     Tone.Transport.scheduleRepeat((time) => {
-        // simple step
-        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 16)) % 16;
-        // basic pattern, but volumes controlled externally
-        if (s % 4 === 0) kick.triggerAttackRelease("C1", "8n", time);
-        if (s % 8 === 4) snare.triggerAttackRelease("8n", time);
-        if (s % 2 === 0) hihat.triggerAttackRelease("32n", time);
-    }, "16n");
-
-    // カウンターメロディ（layer >=4）: 8分のタイミングでスケールから短いフレーズ
-    Tone.Transport.scheduleRepeat((time) => {
-        const currentBar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        // 確率で動かす（activity によって増減）
-        if (Math.random() < Math.min(0.2 + activity * 0.6, 0.95)) {
-            const candidates = scales[currentBar];
-            // pick a note offset from prevNote
-            const choice = candidates[Math.floor(Math.random() * candidates.length)];
-            counterSynth.triggerAttackRelease(choice, "8n", time);
-        }
-    }, "8n");
-
-    // スパークル（layer >=5）: 16分でたまに高音キラキラ
-    Tone.Transport.scheduleRepeat((time) => {
-        if (Math.random() < Math.min(activity * 0.6, 0.5)) {
-            // pick a high pitch in C major-ish
-            const highs = ["E5","G5","A5","C6","D6"];
-            const note = highs[Math.floor(Math.random() * highs.length)];
-            arpeggioSynth.triggerAttackRelease(note, "16n", time + Math.random() * 0.05);
-        }
-    }, "16n");
+        // 傾き(Tilt)でルート音を変える (C3 か A2)
+        const root = (tiltY > 5) ? "A2" : "C3"; 
+        // 構成音は適当に積み上げ
+        chordSynth.triggerAttackRelease([root, Tone.Frequency(root).transpose(7)], "2n", time);
+    }, "1m");
 
     Tone.Transport.start();
 }
 
-// ==============================
-// センサー処理（既存ロジック）
-// ==============================
+// ==========================================
+// 4. センサー処理と理論の実装
+// ==========================================
 function handleMotion(event) {
-    const a = event.accelerationIncludingGravity;
-    if (!a) return;
-    const mag = Math.sqrt((a.x||0)*(a.x||0) + (a.y||0)*(a.y||0) + (a.z||0)*(a.z||0));
+    if (!event.accelerationIncludingGravity) return;
+
+    const acc = event.accelerationIncludingGravity;
+    // 重力込みのベクトル長
+    const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+    
+    // Tilt (傾き) 検知: Y軸の重力成分を見る
+    // スマホを立てると y は -9.8 や 9.8 に近づく
+    // ここでは簡易的に絶対値を使用
+    tiltY = Math.abs(acc.y); 
+
+    // --- Playful: ステップ検出 (ピーク検出) ---
+    // 「前回より大きく」かつ「閾値(13くらい)を超えた」瞬間
+    if (mag > 13 && mag > lastMag && stepCooldown <= 0) {
+        onStepDetected(); // ★ここが遊び的インタラクションの核
+        stepCooldown = 10; // 連打防止
+    }
+    lastMag = mag;
+    if (stepCooldown > 0) stepCooldown--;
+
+    // --- Activity計算 (標準偏差ロジックは維持) ---
     const now = Date.now();
     motionBuffer.push({ t: now, m: mag });
-
-    // 古いデータ削除
-    while (motionBuffer.length > 0 && motionBuffer[0].t < now - DURATION) motionBuffer.shift();
-
-    if (motionBuffer.length < 8) {
-        targetActivity = 0;
-        return;
+    while (motionBuffer.length > 0 && motionBuffer[0].t < now - DURATION) {
+        motionBuffer.shift();
     }
-
-    const mags = motionBuffer.map(d => d.m);
-    const mean = mags.reduce((s,v) => s+v, 0) / mags.length;
-    const variance = mags.reduce((s,v) => s + (v-mean)*(v-mean), 0) / mags.length;
-    const stdDev = Math.sqrt(variance);
-    // 正規化 (仮定): max 8
-    targetActivity = Math.min(stdDev / 8.0, 1.0);
-    smoothedVariance = smoothedVariance * 0.92 + stdDev * 0.08;
-
-    // 歩行ピーク（簡易）を検出して周期を記録
-    const last = motionBuffer[motionBuffer.length - 1].m;
-    const prev2 = motionBuffer.length > 2 ? motionBuffer[motionBuffer.length - 3].m : 0;
-    if (last > prev2 && last > mean + stdDev * 0.6) {
-        stepHistory.push(now);
-        // 3秒以上前のstepは削除
-        stepHistory = stepHistory.filter(t => t > now - 3000);
+    
+    if (motionBuffer.length > 5) {
+        const vals = motionBuffer.map(d => d.m);
+        const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+        const variance = vals.reduce((a,b)=>a+(b-mean)**2,0)/vals.length;
+        const std = Math.sqrt(variance);
+        // 正規化 (0.0 - 1.0)
+        targetActivity = Math.min(std / 5.0, 1.0);
     }
 }
 
-// ==============================
-// 更新ループ（滑らか化 + レイヤー制御 + UI）
-// ==============================
+// ★ Playful: ユーザーのアクションに即座に反応する音
+function onStepDetected() {
+    // コード進行に合った音を「ポン」と鳴らす
+    // ここではランダムに和音を鳴らす
+    const notes = [
+        currentScale[0], 
+        currentScale[2], 
+        Tone.Frequency(currentScale[0]).transpose(12)
+    ];
+    stepSynth.triggerAttackRelease(notes, "8n");
+    
+    // 視覚的フィードバック（背景が一瞬光るなどすると尚良い）
+    document.body.style.backgroundColor = "#333";
+    setTimeout(() => document.body.style.backgroundColor = "#222", 100);
+}
+
+// ==========================================
+// 5. 更新ループ (Emotional & Aleatoricの適用)
+// ==========================================
 function updateLoop() {
-    // activity 補間
-    activity += (targetActivity - activity) * 0.06;
+    // Activityのスムージング
+    activity += (targetActivity - activity) * 0.1;
 
-    // トレンド（短期）
-    trend = trend * 0.85 + (activity - prevActivity) * 0.15;
-    prevActivity = activity;
+    // --- Emotional: インテンシティによる「縦の遷移」 ---
+    // activityに応じて各楽器のボリュームを連続的に変化させる
+    // Low Drum: 常に少し鳴っているが、動くとフルになる
+    gainLow.gain.rampTo(0.2 + activity * 0.8, 0.1);
+    
+    // High Drum: 安静時は無音(0)、激しくなると聞こえてくる
+    // 閾値ではなく、0.3を超えたあたりからリニアに音量が上がる
+    const highVol = Math.max(0, (activity - 0.3) * 1.5); 
+    gainHigh.gain.rampTo(Math.min(highVol, 0.8), 0.1);
 
-    // BPM を activity に基づいてちょっと変える
-    let cycleEstimate = 0;
-    if (stepHistory.length >= 2) {
-        cycleEstimate = (stepHistory[stepHistory.length - 1] - stepHistory[0]) / Math.max(1, stepHistory.length - 1);
+    // Arpeggio: 激しいときはうるさいので少し下げる、などの演出も可能
+    gainArp.gain.rampTo(0.3 + activity * 0.2, 0.1);
+
+    // BPMも少し変化させる (心拍数変動の模倣)
+    const targetBpm = 90 + (activity * 30);
+    Tone.Transport.bpm.rampTo(targetBpm, 0.5);
+
+    // --- Aleatoric: 傾きによるムード変化 ---
+    // スマホを立てている(Y > 6)ならMinor、寝かせているならMajor
+    if (tiltY > 6) {
+        currentScale = scaleMinor;
+        document.getElementById('tiltVal').innerText = "Active/Vertical (Minor)";
+        document.getElementById('tiltVal').style.color = "#00bcd4";
+    } else {
+        currentScale = scaleMajor;
+        document.getElementById('tiltVal').innerText = "Relax/Horizontal (Major)";
+        document.getElementById('tiltVal').style.color = "#e91e63";
     }
-    let targetBpm = 90 + (smoothedVariance * 6);
-    Tone.Transport.bpm.rampTo(targetBpm, 0.2);
 
-    // レイヤー数決定
-    const layer = selectLayers(activity);
-
-    // レイヤーに応じて各 synth の音量を滑らかに調整
-    // pad: layer >=1
-    if (layer >= 1) padSynth.volume.rampTo(-18, 0.25); else padSynth.volume.rampTo(-100, 0.3);
-    // arpeggio: layer >=2
-    if (layer >= 2) arpeggioSynth.volume.rampTo(-14, 0.25); else arpeggioSynth.volume.rampTo(-100, 0.3);
-    // rhythm: layer >=3
-    if (layer >= 3) { kick.volume.rampTo(-8, 0.25); snare.volume.rampTo(-14,0.25); hihat.volume.rampTo(-16,0.25); }
-    else { kick.volume.rampTo(-100, 0.3); snare.volume.rampTo(-100,0.3); hihat.volume.rampTo(-100,0.3); }
-    // counter: layer >=4
-    if (layer >= 4) counterSynth.volume.rampTo(-12, 0.25); else counterSynth.volume.rampTo(-100, 0.3);
-
-    // UI 更新
+    // 数値表示
     document.getElementById('actVal').innerText = activity.toFixed(2);
-    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
-    document.getElementById('layerVal').innerText = layer;
 
     requestAnimationFrame(updateLoop);
 }
 
-// ==============================
-// 初期化 & ボタン処理
-// ==============================
+// ==========================================
+// 6. 初期化 (iOS対応含む)
+// ==========================================
 const btn = document.getElementById('startBtn');
-const sensorState = document.getElementById('sensorState');
-
 btn.addEventListener('click', async () => {
-    // iOS: DeviceMotionEvent.requestPermission がある場合は先に許可
-    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === 'function') {
-        try {
-            const p = await DeviceMotionEvent.requestPermission();
-            if (p === 'granted') {
-                window.addEventListener('devicemotion', handleMotion);
-                motionListenerAttached = true;
-                sensorState.innerText = "センサー取得中(iOS)";
-            } else {
-                alert("センサーの使用が許可されませんでした。");
-                return;
-            }
-        } catch (e) {
-            alert("センサー許可エラー: " + e);
-            return;
-        }
-    } else {
-        // その他環境
-        window.addEventListener('devicemotion', handleMotion);
-        motionListenerAttached = true;
-        sensorState.innerText = "センサー取得中(Android/Other)";
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        const p = await DeviceMotionEvent.requestPermission();
+        if (p !== 'granted') return alert("センサー許可が必要です");
     }
-
-    // Tone を start して synths を準備
+    
+    window.addEventListener('devicemotion', handleMotion);
     await Tone.start();
-    setupSynths();
-
-    // 音楽ループ開始
-    startMusicLoop();
-    updateLoop();
-
-    btn.innerText = "演奏中...";
-    btn.disabled = true;
+    setupSynths().then(() => {
+        startMusicLoop();
+        updateLoop();
+        btn.innerText = "Running...";
+        btn.disabled = true;
+    });
 });
 </script>
 </body>
