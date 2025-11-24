@@ -3,41 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Musical Wind & Arpeggio</title>
+    <title>Nature to Speed</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #000; color: #fff; text-align: center; padding: 20px; overflow: hidden; user-select: none; }
-        h1 { font-size: 1.2rem; color: #00d1b2; letter-spacing: 2px; text-transform: uppercase; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #1a1a24; color: #fff; text-align: center; padding: 20px; overflow: hidden; user-select: none; }
         
         #playBtn {
             margin-top: 35vh;
             padding: 20px 60px; font-size: 1.2rem; font-weight: bold;
-            color: #fff; background: linear-gradient(135deg, #00d1b2, #0077ff);
+            color: #fff; background: linear-gradient(135deg, #20c997, #0077ff);
             border: none; border-radius: 50px;
-            box-shadow: 0 0 20px rgba(0, 209, 178, 0.6); transition: transform 0.1s;
+            box-shadow: 0 0 20px rgba(32, 201, 151, 0.5); transition: transform 0.1s;
         }
         #playBtn:active { transform: scale(0.95); }
 
-        .hud { position: absolute; top: 20px; width: 100%; display: flex; justify-content: center; gap: 20px; font-family: monospace; font-size: 1.2rem; z-index: 10;}
-        .hud span { color: #00d1b2; }
+        .hud { position: absolute; top: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 10; pointer-events: none;}
+        .status-label { font-size: 1.5rem; font-weight: bold; letter-spacing: 2px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .sub-label { font-size: 0.9rem; color: #aaa; font-family: monospace; }
 
-        /* 風と速度のビジュアライザ */
-        #wind-visual {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 200px; height: 200px; border-radius: 50%;
-            border: 2px solid #333; opacity: 0.5; transition: all 0.1s; z-index: -1;
+        /* 背景の変化 */
+        #bg-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -2;
+            background: linear-gradient(to bottom, #87CEEB, #E0F7FA); /* 空色（初期） */
+            opacity: 0.8; transition: background 1s;
+        }
+        
+        /* 鳥のビジュアライザ */
+        .bird-visual {
+            position: absolute; width: 10px; height: 10px; background: #fff; border-radius: 50%;
+            opacity: 0; transition: opacity 0.5s; pointer-events: none;
         }
     </style>
 </head>
 <body>
 
+    <div id="bg-layer"></div>
+
     <div class="hud">
-        <div>SPEED: <span id="speedVal">0%</span></div>
+        <div class="status-label" id="statusText">WALK</div>
+        <div class="sub-label">SPEED: <span id="speedVal">0%</span></div>
     </div>
 
-    <h1>Wind & Harmony</h1>
-    <div id="wind-visual"></div>
-    <button id="playBtn">START EXPERIENCE</button>
+    <button id="playBtn">START JOURNEY</button>
 
 <script>
 // ==========================================
@@ -49,23 +56,21 @@ const BUFFER_SIZE = 10;
 const motionBuffer = [];
 
 // ==========================================
-// 2. 音楽理論データ: コードトーン定義
+// 2. 音楽理論データ (Key: C Major)
 // ==========================================
-// 王道進行 (IV - V - iii - vi)
-// キー: C Major (ハ長調)
 const chords = [
-    { name: "FM7", notes: ["F3", "A3", "C4", "E4"] }, // 0: Sub Dominant
-    { name: "G7",  notes: ["G3", "B3", "D4", "F4"] }, // 1: Dominant
-    { name: "Em7", notes: ["E3", "G3", "B3", "D4"] }, // 2: Tonic substitute
-    { name: "Am7", notes: ["A3", "C4", "E4", "G4"] }  // 3: Tonic substitute
+    { name: "FM7", notes: ["F3", "A3", "C4", "E4"] },
+    { name: "G7",  notes: ["G3", "B3", "D4", "F4"] },
+    { name: "Em7", notes: ["E3", "G3", "B3", "D4"] },
+    { name: "Am7", notes: ["A3", "C4", "E4", "G4"] } 
 ];
 
-// 高速アルペジオ用（オクターブ上の音を追加した定義）
+// 高速アルペジオ用 (高音域)
 const arpeggioNotes = [
-    ["F4", "A4", "C5", "E5", "F5", "A5"], // FM7 high
-    ["G4", "B4", "D5", "F5", "G5", "B5"], // G7 high
-    ["E4", "G4", "B4", "D5", "E5", "G5"], // Em7 high
-    ["A4", "C5", "E5", "G5", "A5", "C6"]  // Am7 high
+    ["F4", "A4", "C5", "E5", "F5", "A5"], 
+    ["G4", "B4", "D5", "F5", "G5", "B5"], 
+    ["E4", "G4", "B4", "D5", "E5", "G5"], 
+    ["A4", "C5", "E5", "G5", "A5", "C6"]  
 ];
 
 // ==========================================
@@ -73,100 +78,146 @@ const arpeggioNotes = [
 // ==========================================
 let leadSynth, chordSynth, bassSynth, drumKit;
 let windNode, windGain, windFilter;
+let birdSynth, birdPan;
 
 function setupAudio() {
-    // A. シンセサイザー類
-    const limiter = new Tone.Limiter(-1).toDestination();
+    const limiter = new Tone.Limiter(-0.5).toDestination();
+    const reverb = new Tone.Reverb({ decay: 2, wet: 0.3 }).connect(limiter); // 全体にリバーブをかけて空間演出
 
-    // 1. リード (メロディ) - 澄んだ音
+    // A. 楽器類
     leadSynth = new Tone.Synth({
         oscillator: { type: "triangle" },
         envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.5 },
         volume: -6
-    }).connect(limiter);
+    }).connect(reverb);
 
-    // 2. コード (バッキング)
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "sine" },
-        envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 },
-        volume: -12
-    }).connect(limiter);
+        oscillator: { type: "sine" }, // 優しい音
+        envelope: { attack: 0.1, decay: 0.3, sustain: 0.4, release: 1 },
+        volume: -10
+    }).connect(reverb);
 
-    // 3. ベース
     bassSynth = new Tone.FMSynth({
-        harmonicity: 1, modulationIndex: 3,
+        harmonicity: 1, modulationIndex: 2,
         envelope: { attack: 0.05, decay: 0.2, sustain: 0.8, release: 0.5 },
         volume: -6
-    }).connect(limiter);
+    }).connect(limiter); // ベースはリバーブ少なめorなし
 
-    // 4. ドラム
     drumKit = {
         kick: new Tone.MembraneSynth({ volume: -4 }).connect(limiter),
-        hat: new Tone.MetalSynth({ frequency: 200, envelope: { decay: 0.05 }, volume: -20 }).connect(limiter)
+        hat: new Tone.MetalSynth({ frequency: 200, envelope: { decay: 0.05 }, volume: -22 }).connect(limiter)
     };
 
-    // B. 風切り音 (Wind Noise) システム
-    // ピンクノイズを生成し、バンドパスフィルターを通す
-    windFilter = new Tone.Filter({
-        type: "bandpass",
-        frequency: 400,
-        Q: 1
-    });
-    windGain = new Tone.Gain(0).connect(limiter); // 初期音量は0
+    // B. 風 (控えめ設定)
+    windFilter = new Tone.Filter({ type: "bandpass", frequency: 200, Q: 0.5 });
+    windGain = new Tone.Gain(0).connect(limiter);
     windNode = new Tone.Noise("pink").connect(windFilter).connect(windGain);
     windNode.start();
+
+    // C. 鳥 (合成音)
+    // 左右に振るためのPanner
+    birdPan = new Tone.Panner(0).connect(reverb);
+    
+    // 鳥の鳴き声用シンセ
+    // 周波数がスライドするエンベロープを使う
+    birdSynth = new Tone.Synth({
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 }, // 非常に短い音
+        volume: -12
+    }).connect(birdPan);
 }
 
 // ==========================================
-// 4. 演奏シーケンサー
+// 4. 鳥の生成ロジック
+// ==========================================
+function triggerBird() {
+    // ランダムに左右に振る (-1.0 ~ 1.0)
+    birdPan.pan.value = (Math.random() * 2) - 1;
+    
+    // 鳥っぽい高音 (C6 ~ C7周辺)
+    // 少しピッチを揺らすとリアルになるが、ここではシンプルに高音短音
+    const freq = 1000 + Math.random() * 2000; // 1000Hz - 3000Hz
+    
+    // 2回鳴く (チュンチュン) か 1回鳴く (ピヨ)
+    const now = Tone.now();
+    
+    birdSynth.triggerAttackRelease(freq, "32n", now);
+    // スライド効果(Frequency Envelopeの代わり)
+    birdSynth.frequency.rampTo(freq + 500, 0.05, now);
+
+    if (Math.random() > 0.5) {
+        birdSynth.triggerAttackRelease(freq + 200, "32n", now + 0.1);
+    }
+
+    // 視覚演出
+    showBirdVisual();
+}
+
+function showBirdVisual() {
+    const el = document.createElement('div');
+    el.className = 'bird-visual';
+    el.style.left = (Math.random() * 80 + 10) + '%';
+    el.style.top = (Math.random() * 60 + 10) + '%';
+    document.body.appendChild(el);
+    
+    // アニメーション
+    setTimeout(() => { el.style.opacity = 1; }, 10);
+    setTimeout(() => { el.style.opacity = 0; }, 500);
+    setTimeout(() => { el.remove(); }, 1000);
+}
+
+// ==========================================
+// 5. シーケンサー
 // ==========================================
 let tick = 0;
-// アルペジオの進行位置を記憶する変数
-let arpIndex = 0; 
 
 function startLoop() {
-    Tone.Transport.bpm.value = 110;
+    Tone.Transport.bpm.value = 100;
 
     Tone.Transport.scheduleRepeat((time) => {
-        const intensity = smoothedActivity; // 0.0 - 1.0
+        const intensity = smoothedActivity; 
         
         const beat16 = tick % 16;
-        const barIndex = Math.floor(tick / 16) % 4; // 0->1->2->3 (コード進行)
+        const barIndex = Math.floor(tick / 16) % 4;
         const currentChord = chords[barIndex];
 
-        // --- 1. コード演奏 (和音) ---
-        // 常に鳴らして「音楽的基盤」を作る
+        // --- 1. 鳥 (Low Activityのみ) ---
+        if (intensity < 0.3) {
+            // 確率で鳴く (たまに)
+            if (Math.random() < 0.05) { // 5%の確率で毎16分音符ごとに判定
+                triggerBird();
+            }
+        }
+
+        // --- 2. コード (常に) ---
         if (beat16 === 0) {
             chordSynth.triggerAttackRelease(currentChord.notes, "2n", time);
         }
 
-        // --- 2. ベース ---
-        // intensityが上がると少しリズミカルになる
+        // --- 3. ベース & ドラム ---
+        // intensityで音数が増える
         if (beat16 === 0) {
-             // ルート音 (F3 -> F2)
              const root = currentChord.notes[0].replace("3","2").replace("4","3");
              bassSynth.triggerAttackRelease(root, "8n", time);
+             drumKit.kick.triggerAttackRelease("C1", "8n", time);
         }
-        if (intensity > 0.5 && beat16 === 10) { // 裏打ち
-             const root = currentChord.notes[0].replace("3","2").replace("4","3");
-             bassSynth.triggerAttackRelease(root, "8n", time);
+        
+        if (intensity > 0.5) {
+            // 走り出すとベースとハイハットが増える
+            if (beat16 === 10) {
+                const root = currentChord.notes[0].replace("3","2").replace("4","3");
+                bassSynth.triggerAttackRelease(root, "8n", time);
+            }
+            if (beat16 % 4 === 0) drumKit.hat.triggerAttackRelease("32n", time);
         }
-
-        // --- 3. メロディ (今回の核心部分) ---
-        playTheoreticalMelody(time, intensity, beat16, barIndex);
-
-        // --- 4. ドラム ---
-        // Kick
-        if (beat16 % 4 === 0) drumKit.kick.triggerAttackRelease("C1", "8n", time);
-        // Hat (速度に合わせて細かくなる)
-        if (intensity < 0.3) {
-            if (beat16 % 4 === 2) drumKit.hat.triggerAttackRelease("32n", time);
-        } else if (intensity < 0.7) {
-            if (beat16 % 2 === 0) drumKit.hat.triggerAttackRelease("32n", time);
-        } else {
-            // 高速時: 16分連打
+        
+        if (intensity > 0.8) {
+            // 暴走モード: ドラム連打
             drumKit.hat.triggerAttackRelease("32n", time);
         }
+
+        // --- 4. メロディ (理論的アルペジオ) ---
+        playMelody(time, intensity, beat16, barIndex);
 
         tick++;
     }, "16n");
@@ -174,136 +225,108 @@ function startLoop() {
     Tone.Transport.start();
 }
 
-// 音楽理論に基づいたメロディ生成関数
-function playTheoreticalMelody(time, act, beat, chordIdx) {
-    let noteToPlay = null;
-    let duration = "8n";
-
-    // A. 静寂〜歩き (Activity: 低)
-    // ゆったりと、コードの構成音を「置く」ように鳴らす
+function playMelody(time, act, beat, chordIdx) {
+    // 静止時(Birdsフェーズ)はメロディを極力減らす（環境音メイン）
     if (act < 0.3) {
-        if (beat === 0 || beat === 8) { // 小節の頭と真ん中だけ
-            // そのコードのルートか5度音だけを選ぶ（一番安定する音）
-            if(Math.random() > 0.5) noteToPlay = chords[chordIdx].notes[0]; // Root
-            else noteToPlay = chords[chordIdx].notes[2]; // 5th
+        // 小節の頭だけ優しく鳴らす
+        if (beat === 0 && Math.random() > 0.5) {
+            leadSynth.triggerAttackRelease(chords[chordIdx].notes[2], "4n", time);
         }
-    } 
-    // B. 小走り (Activity: 中)
-    // 8分音符でランダムなフレーズ。ただしコードトーンのみ。
-    else if (act < 0.7) {
-        if (beat % 2 === 0) {
-            if (Math.random() < 0.6) {
-                // コード内の音からランダム
-                const notes = chords[chordIdx].notes;
-                noteToPlay = notes[Math.floor(Math.random() * notes.length)];
-            }
-        }
-    } 
-    // C. 疾走・暴走 (Activity: 高) -> ここを修正！
-    // ランダムではなく「規則的なアルペジオ」にする
-    else {
-        // 16分音符ですべて埋める勢い
-        duration = "16n";
-        
-        // 【重要】アルペジオロジック
-        // ランダムだと「ぐちゃぐちゃ」になるので、順番に鳴らす
-        // 例: ド -> ミ -> ソ -> ド -> ミ...
-        const arpNotes = arpeggioNotes[chordIdx]; // 高音域のコードトーン配列
-        
-        // tickに合わせて音を選ぶ（順番に上昇していく）
-        // これにより「テロリロテロリロ」というゲーム的で綺麗なフレーズになる
-        const noteIndex = tick % arpNotes.length; 
-        noteToPlay = arpNotes[noteIndex];
+        return;
     }
-
-    if (noteToPlay) {
-        leadSynth.triggerAttackRelease(noteToPlay, duration, time);
+    
+    // アルペジオモード (Activity高)
+    if (act > 0.6) {
+        // 音数制御: Activityが高いほど隙間なく埋める
+        const density = act > 0.8 ? 1 : 2; // 0.8超えなら全部、それ以外は2つおき
+        if (tick % density === 0) {
+            const arpNotes = arpeggioNotes[chordIdx];
+            const noteIndex = tick % arpNotes.length; 
+            leadSynth.triggerAttackRelease(arpNotes[noteIndex], "16n", time);
+        }
+    } 
+    // 中間モード (ランダムなコードトーン)
+    else {
+        if (beat % 2 === 0 && Math.random() < 0.5) {
+            const notes = chords[chordIdx].notes;
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            leadSynth.triggerAttackRelease(note, "8n", time);
+        }
     }
 }
 
 // ==========================================
-// 5. 更新ループ (風の制御 & 画面)
+// 6. 更新ループ (風 & 背景)
 // ==========================================
 function update() {
     requestAnimationFrame(update);
     if(!isPlaying) return;
 
-    // スムージング
     smoothedActivity += ((motionBuffer.length ? motionBuffer[motionBuffer.length-1] : 0) - smoothedActivity) * 0.05;
-    // 0.0〜1.0の範囲にクランプ
     smoothedActivity = Math.max(0, Math.min(1, smoothedActivity));
 
-    // --- 風 (Wind) の制御 ---
-    // 1. 音量: 動きに合わせて大きくなる (0.0 -> 0.8)
-    // 動きがないときは無音
-    windGain.gain.rampTo(smoothedActivity * 0.8, 0.1);
+    // --- 風制御 (控えめ) ---
+    // Gain: 0.0 -> 0.15 (以前の0.8から大幅減)
+    // 動き始め(0.3)までは無音
+    let windVol = Math.max(0, (smoothedActivity - 0.2) * 0.25); 
+    windGain.gain.rampTo(windVol, 0.1);
 
-    // 2. 音質: 動きが速いほど「高い音（ヒュオオ）」になる
-    // Bandpass Frequency: 200Hz(ゴォー) -> 2000Hz(シュオオ)
-    const windFreq = 200 + (smoothedActivity * 1800);
+    const windFreq = 200 + (smoothedActivity * 1000); // フィルターも穏やかに
     windFilter.frequency.rampTo(windFreq, 0.1);
 
-    // --- BPM制御 ---
-    // 少しだけBPMも上げる (110 -> 140)
-    // あまり上げすぎるとアルペジオが追いつかなくなるので控えめに
-    Tone.Transport.bpm.rampTo(110 + (smoothedActivity * 30), 0.1);
+    // --- 背景色制御 ---
+    const bg = document.getElementById('bg-layer');
+    const statusText = document.getElementById('statusText');
+    const speedVal = document.getElementById('speedVal');
 
-    // 画面更新
-    document.getElementById('speedVal').innerText = Math.round(smoothedActivity * 100) + "%";
-    
-    // ビジュアライザ更新
-    const viz = document.getElementById('wind-visual');
-    const scale = 0.5 + smoothedActivity * 1.5;
-    const opacity = 0.2 + smoothedActivity * 0.6;
-    viz.style.transform = `translate(-50%, -50%) scale(${scale})`;
-    viz.style.opacity = opacity;
-    // 風が強くなると色も変わる
-    viz.style.borderColor = `hsl(${180 - smoothedActivity*60}, 100%, 50%)`; // 青緑 -> 青
-    viz.style.borderWidth = `${2 + smoothedActivity * 10}px`;
+    speedVal.innerText = Math.round(smoothedActivity * 100) + "%";
+
+    // BPM制御
+    Tone.Transport.bpm.rampTo(100 + (smoothedActivity * 40), 0.1);
+
+    if (smoothedActivity < 0.3) {
+        // 空色 (鳥タイム)
+        bg.style.background = "linear-gradient(to bottom, #87CEEB, #E0F7FA)";
+        statusText.innerText = "NATURE WALK";
+        statusText.style.color = "#fff";
+    } else if (smoothedActivity < 0.7) {
+        // 夕暮れ/少し紫 (ランニング)
+        bg.style.background = "linear-gradient(to bottom, #6a11cb, #2575fc)";
+        statusText.innerText = "RUNNING";
+        statusText.style.color = "#ffeb3b";
+    } else {
+        // 宇宙/赤黒 (疾走)
+        bg.style.background = "linear-gradient(to bottom, #44000b, #000)";
+        statusText.innerText = "GALAXY DASH";
+        statusText.style.color = "#ff0055";
+    }
 }
 
 // ==========================================
-// 6. センサー入力
+// 7. センサー入力
 // ==========================================
 function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
     if (!a) return;
-    
     const x = a.x || 0; const y = a.y || 0; const z = a.z || 0;
-    // ベクトル長の変化を見る簡易ロジック
-    // 直前の値との差分をとるのが理想だが、ここでは簡易的に絶対値のゆらぎを利用
-    // スマホを傾けるだけでなく「振る」動作を検知したい
-    
-    // 重力加速度(約9.8)を除去して純粋なシェイク強度を取りたいが、
-    // 簡易的に「全体の大きさ - 9.8」の絶対値などを使う
     const mag = Math.sqrt(x*x + y*y + z*z);
     const shake = Math.abs(mag - 9.8); 
-
-    // 感度調整 (shakeが 5.0 くらいでMAXになるように)
     const normalized = Math.min(shake / 5.0, 1.0);
-    
     motionBuffer.push(normalized);
     if(motionBuffer.length > BUFFER_SIZE) motionBuffer.shift();
 }
 
-// ==========================================
-// 7. 開始処理
-// ==========================================
 document.getElementById('playBtn').addEventListener('click', async () => {
     if (typeof DeviceMotionEvent.requestPermission === 'function') {
         const state = await DeviceMotionEvent.requestPermission();
         if (state !== 'granted') return alert("センサー許可が必要です");
     }
-    
     window.addEventListener('devicemotion', handleMotion);
     await Tone.start();
-    
     setupAudio();
     startLoop();
-    
     isPlaying = true;
     update();
-    
     document.getElementById('playBtn').style.display = 'none';
 });
 </script>
