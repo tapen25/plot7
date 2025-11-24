@@ -3,179 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tamacoro Style Interaction</title>
+    <title>Circular Progression & Dynamic Melody</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #111; color: #eee; text-align: center; padding: 20px; overflow: hidden; }
-        h1 { font-size: 1.5rem; letter-spacing: 2px; text-transform: uppercase; color: #ff0055; }
-        p { font-size: 0.9rem; color: #888; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #0d0d15; color: #fff; text-align: center; padding: 20px; overflow: hidden; user-select: none; }
+        h1 { font-size: 1.2rem; color: #00d1b2; letter-spacing: 2px; }
         
-        #startBtn { 
-            padding: 20px 60px; font-size: 1.2rem; font-weight: bold;
-            background: linear-gradient(45deg, #ff0055, #ff5500); 
-            border: none; color: #fff; border-radius: 50px; 
-            cursor: pointer; margin-top: 40px; box-shadow: 0 0 20px rgba(255, 0, 85, 0.5);
-            transition: transform 0.1s;
+        #playBtn {
+            margin-top: 40vh;
+            padding: 20px 50px; font-size: 1.5rem; font-weight: bold;
+            color: #fff; background: #ff0055; border: none; border-radius: 50px;
+            box-shadow: 0 0 15px #ff0055; transition: transform 0.1s;
         }
-        #startBtn:active { transform: scale(0.95); }
+        #playBtn:active { transform: scale(0.95); }
 
-        #visualizer {
-            margin: 40px auto;
-            width: 200px; height: 200px;
-            border-radius: 50%;
-            background: radial-gradient(circle, #333, #000);
-            border: 2px solid #555;
-            display: flex; justify-content: center; align-items: center;
-            position: relative;
-            transition: all 0.1s;
+        /* ビジュアライザー */
+        .bar-container {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 100%;
+            display: flex; align-items: flex-end; justify-content: space-around;
+            z-index: -1; pointer-events: none; opacity: 0.5;
         }
-        
-        #status-text { position: absolute; z-index: 10; font-weight: bold; font-size: 1.5rem; text-shadow: 0 0 10px #000; }
-        
-        .hud { margin-top: 30px; display: flex; justify-content: space-around; font-family: monospace; font-size: 0.9rem; }
-        .hud div span { display: block; font-size: 1.2rem; color: #ff5500; }
+        .bar { width: 10%; background: linear-gradient(to top, #00d1b2, transparent); transition: height 0.1s; }
+
+        .info { position: absolute; top: 60px; width: 100%; text-align: center; font-family: monospace; }
+        .level-text { font-size: 2rem; font-weight: bold; text-shadow: 0 0 10px white; }
     </style>
 </head>
 <body>
 
-    <h1>Rolling Gizmo Style</h1>
-    <p>スマホを持って「START」を押し、<br>ボールに乗っているつもりで振ってください。</p>
-    
-    <div id="visualizer">
-        <div id="status-text">STOP</div>
+    <h1>Run & Roll Music</h1>
+    <div class="info">
+        <div>Activity: <span id="actVal">0%</span></div>
+        <div class="level-text" id="lvlText">STOP</div>
     </div>
 
-    <button id="startBtn">START</button>
-    
-    <div class="hud">
-        <div>SPEED<span id="speedVal">0%</span></div>
-        <div>BPM<span id="bpmVal">0</span></div>
-        <div>PITCH<span id="pitchVal">+0</span></div>
+    <button id="playBtn">TAP TO START</button>
+
+    <div class="bar-container">
+        <div class="bar" id="b1"></div><div class="bar" id="b2"></div>
+        <div class="bar" id="b3"></div><div class="bar" id="b4"></div>
     </div>
 
 <script>
 // ==========================================
-// 1. システム設定
+// 1. グローバル設定
 // ==========================================
-const MOTION_BUFFER_SIZE = 10;
-const motionBuffer = []; 
-let currentActivity = 0.0; // 0.0(静止) 〜 1.0(最大)
+let isPlaying = false;
+let activity = 0.0;       // 現在の活動量 (0.0 - 1.0)
 let smoothedActivity = 0.0;
-
-// ステージ管理
-// 0.0-0.3: Low (Filter Close, BassOnly)
-// 0.3-0.7: Mid (Filter Open, +Chords)
-// 0.7-1.0: High (High BPM, High Pitch, +Arp +Wind)
+const BUFFER_SIZE = 10;
+const motionBuffer = [];
 
 // ==========================================
-// 2. 音源設定 (Tone.js)
+// 2. 音楽理論データ (Key: C Major / Am)
 // ==========================================
-let masterFilter;
-let kick, bass, chordSynth, arpSynth, windNode;
-let chordVol, arpVol, windVol; // Gain Nodes for Layering
+
+// 王道進行 (IV - V - iii - vi) => FM7 - G7 - Em7 - Am7
+// ずっとループできる「終わらない感」がある進行
+const chordProgression = [
+    ["F3", "A3", "C4", "E4"], // FMaj7
+    ["G3", "B3", "D4", "F4"], // G7
+    ["E3", "G3", "B3", "D4"], // Em7
+    ["A2", "C3", "E3", "G3"]  // Am7
+];
+
+// メロディ用スケール (C Major Scale)
+const scale = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5", "D5", "E5"];
+
+// ==========================================
+// 3. 音源セットアップ
+// ==========================================
+let leadSynth, chordSynth, bassSynth, drumKit;
+let masterFilter, delay;
 
 function setupAudio() {
-    // A. マスターエフェクト (LPF: こもり具合の制御)
-    masterFilter = new Tone.Filter({
-        type: "lowpass",
-        frequency: 200, // 初期値はこもった音
-        Q: 1
-    }).toDestination();
-    
-    // 全体のリミッター（音割れ防止）
-    const limiter = new Tone.Limiter(-1).connect(masterFilter);
+    // エフェクト
+    masterFilter = new Tone.Filter(1000, "lowpass").toDestination();
+    delay = new Tone.FeedbackDelay("8n.", 0.3).connect(masterFilter);
 
-    // B. 各楽器のセットアップ
-    
-    // 1. KICK & BASS (常時鳴る)
-    kick = new Tone.MembraneSynth({
-        volume: -2,
-        envelope: { sustain: 0, attack: 0.02, decay: 0.8 },
-        octaves: 10
-    }).connect(limiter);
+    // 1. リードシンセ (メロディ用) - 抜けの良い音
+    leadSynth = new Tone.Synth({
+        oscillator: { type: "square" },
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 1 },
+        volume: -8
+    }).connect(delay);
 
-    bass = new Tone.FMSynth({
-        volume: -5,
-        harmonicity: 1,
-        modulationIndex: 3.5,
-        oscillator: { type: "custom", partials: [0,1,0,2] },
-        envelope: { attack: 0.08, decay: 0.3, sustain: 1, release: 0.5 },
-        modulation: { type: "square" },
-        modulationEnvelope: { attack: 0.1, decay: 0.2, sustain: 0.2, release: 0.5 }
-    }).connect(limiter);
-
-    // 2. CHORDS (中盤からフェードイン)
-    chordVol = new Tone.Gain(0).connect(limiter);
+    // 2. コードシンセ - ふわっとした音
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -8,
-        oscillator: { type: "sawtooth" }, // 派手めな音
-        envelope: { attack: 0.1, decay: 0.1, sustain: 0.6, release: 0.8 }
-    }).connect(chordVol);
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 },
+        volume: -10
+    }).connect(masterFilter);
 
-    // 3. ARPEGGIO (終盤で入るキラキラ音)
-    arpVol = new Tone.Gain(0).connect(limiter);
-    arpSynth = new Tone.AMSynth({
-        volume: -8,
-        harmonicity: 2.5,
-        oscillator: { type: "fatsawtooth" },
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.1, release: 0.1 },
-        modulation: { type: "square", modulationIndex: 3 }
-    }).connect(arpVol);
+    // 3. ベース - 太い音
+    bassSynth = new Tone.FMSynth({
+        harmonicity: 1, modulationIndex: 3.5,
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.5 },
+        modulationEnvelope: { attack: 0.1, decay: 0.3, sustain: 0.1 },
+        volume: -5
+    }).connect(masterFilter);
 
-    // 4. WIND NOISE (速度に応じた風)
-    windVol = new Tone.Gain(0).connect(limiter);
-    const windFilter = new Tone.Filter(800, "bandpass").connect(windVol);
-    windNode = new Tone.Noise("pink").connect(windFilter);
-    windNode.start(); // ノイズはずっと流しておく(Gainで制御)
+    // 4. ドラム
+    drumKit = {
+        kick: new Tone.MembraneSynth({ volume: -2 }).connect(masterFilter),
+        hat: new Tone.MetalSynth({ frequency: 200, envelope: { decay: 0.05 }, harmonicity: 5.1, volume: -15 }).connect(masterFilter)
+    };
 }
 
 // ==========================================
-// 3. 音楽ロジック (シーケンス)
+// 4. シーケンサー (自動演奏ロジック)
 // ==========================================
-// キー: F Minor (疾走感のあるキー)
-const scale = ["F2", "G2", "Ab2", "Bb2", "C3", "Db3", "Eb3"];
-const chordProgression = [
-    ["F3","Ab3","C4"], ["Eb3","G3","Bb3"], ["Db3","F3","Ab3"], ["C3","E3","G3"] // Fm - Eb - Db - C
-];
 let tick = 0;
 
-function startSequencer() {
-    Tone.Transport.bpm.value = 100;
+function startLoop() {
+    Tone.Transport.bpm.value = 110; // 基本BPM
 
     Tone.Transport.scheduleRepeat((time) => {
-        // 現在のアクティビティに基づいて「移調 (Transpose)」を計算
-        // 0.0なら0, 1.0なら+12(1オクターブ上)
-        const transpose = Math.floor(smoothedActivity * 12); 
-        
-        const beat = tick % 16;
-        const bar = Math.floor(tick / 16) % 4;
+        // --- 状態判定 ---
+        // 0.0-0.3: Low, 0.3-0.7: Mid, 0.7-1.0: High
+        const intensity = smoothedActivity;
 
-        // --- Bass & Kick (常に鳴る) ---
-        if (beat % 4 === 0) {
-            kick.triggerAttackRelease("F1", "8n", time);
+        const beat16 = tick % 16;
+        const barIndex = Math.floor(tick / 16) % 4; // 0,1,2,3 (コード進行の位置)
+
+        // --- A. コード (王道進行ループ) ---
+        // 各小節の頭(beat16===0)と、裏拍で鳴らす
+        if (beat16 === 0) {
+            chordSynth.triggerAttackRelease(chordProgression[barIndex], "2n", time);
         }
-        if (beat === 2 || beat === 10) { // 裏打ちベース
-             const bassNote = Tone.Frequency(scale[0]).transpose(transpose);
-             bass.triggerAttackRelease(bassNote, "8n", time);
-        }
-        
-        // --- Chords (Level 2~) ---
-        if (beat === 0) {
-            // コードを移調して鳴らす
-            const currentChord = chordProgression[bar].map(n => Tone.Frequency(n).transpose(transpose));
-            chordSynth.triggerAttackRelease(currentChord, "2n", time);
+        if (intensity > 0.4 && beat16 === 8) { // 少し動くと裏拍にもコードが入る
+            chordSynth.triggerAttackRelease(chordProgression[barIndex], "8n", time);
         }
 
-        // --- Arpeggio (Level 3~) ---
-        // 16分音符でランダムに鳴らす
-        if (smoothedActivity > 0.6) {
-            if (Math.random() > 0.3) {
-                // スケールからランダム選出 + 移調 + オクターブ上げ
-                const noteRaw = scale[Math.floor(Math.random() * scale.length)];
-                const note = Tone.Frequency(noteRaw).transpose(transpose + 12); 
-                arpSynth.triggerAttackRelease(note, "16n", time);
-            }
+        // --- B. ベース ---
+        if (beat16 === 0 || (intensity > 0.5 && beat16 === 10)) {
+            // コードのルート音を鳴らす
+            const root = chordProgression[barIndex][0].replace("3", "2").replace("4","3"); // オクターブ下げる
+            bassSynth.triggerAttackRelease(root, "8n", time);
         }
+
+        // --- C. メロディ (可変アレンジ) ---
+        // ここが今回の肝。activityが高いほど「細かく」「高く」なる。
+        playDynamicMelody(time, intensity, beat16);
+
+        // --- D. ドラム ---
+        if (beat16 % 4 === 0) drumKit.kick.triggerAttackRelease("C1", "8n", time);
+        if (intensity > 0.2 && beat16 % 2 === 0) drumKit.hat.triggerAttackRelease("32n", time); // 8分
+        if (intensity > 0.7 && beat16 % 1 === 0) drumKit.hat.triggerAttackRelease("32n", time); // 16分連打
 
         tick++;
     }, "16n");
@@ -183,110 +157,128 @@ function startSequencer() {
     Tone.Transport.start();
 }
 
-// ==========================================
-// 4. インタラクション制御ループ (Visual & Audio Param)
-// ==========================================
-function updateLoop() {
-    requestAnimationFrame(updateLoop);
-    
-    if (!masterFilter) return;
+// メロディ生成関数
+function playDynamicMelody(time, act, beat) {
+    let playChance = 0;
+    let noteDuration = "8n";
+    let noteIndexOffset = 0;
 
-    // A. スムージング処理 (急激な変化を防ぐ)
-    smoothedActivity += (currentActivity - smoothedActivity) * 0.1;
-    
-    // B. パラメータマッピング
-    
-    // 1. フィルター (LPF Cutoff)
-    // 静止時 200Hz(モコモコ) -> 最大 10000Hz(クリア)
-    const cutoff = 200 + (Math.pow(smoothedActivity, 2) * 10000); 
-    masterFilter.frequency.rampTo(cutoff, 0.1);
+    if (act < 0.3) {
+        // Lv1: 静止〜歩き (4分音符中心、音数少ない)
+        if (beat % 4 === 0) playChance = 0.8; 
+    } else if (act < 0.7) {
+        // Lv2: 小走り (8分音符、シンコペーションあり)
+        if (beat % 2 === 0) playChance = 0.7;
+        else if (Math.random() > 0.5) playChance = 0.4; // 裏拍
+        noteIndexOffset = 2; // 少し音程上げる
+    } else {
+        // Lv3: 疾走 (16分音符、アルペジオ的、高音)
+        playChance = 0.9; // ほぼ鳴りっぱなし
+        noteDuration = "16n";
+        noteIndexOffset = 5; // オクターブ近く上げる
+    }
 
-    // 2. BPM (Tempo)
-    // 90 -> 170
-    const targetBpm = 90 + (smoothedActivity * 80);
-    Tone.Transport.bpm.rampTo(targetBpm, 0.1);
-
-    // 3. レイヤーボリューム (Vertical Remixing)
-    
-    // Chords: 0.2を超えたら入り始める
-    let cVol = (smoothedActivity - 0.2) * 2; 
-    cVol = Math.max(0, Math.min(cVol, 0.8)); // 0.0 - 0.8
-    chordVol.gain.rampTo(cVol, 0.1);
-
-    // Arp: 0.5を超えたら入り始める
-    let aVol = (smoothedActivity - 0.5) * 2;
-    aVol = Math.max(0, Math.min(aVol, 0.6));
-    arpVol.gain.rampTo(aVol, 0.1);
-
-    // Wind: 速度に比例
-    let wVol = smoothedActivity * 0.8;
-    windVol.gain.rampTo(wVol, 0.1);
-
-    // C. 画面更新
-    const pct = Math.round(smoothedActivity * 100);
-    document.getElementById('speedVal').innerText = pct + "%";
-    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
-    document.getElementById('pitchVal').innerText = "+" + Math.floor(smoothedActivity * 12);
-    
-    const viz = document.getElementById('visualizer');
-    const scale = 1 + (smoothedActivity * 0.5);
-    const color = `hsl(${smoothedActivity * 60}, 100%, 50%)`; // 赤 -> 黄
-    
-    viz.style.transform = `scale(${scale})`;
-    viz.style.borderColor = color;
-    viz.style.boxShadow = `0 0 ${smoothedActivity * 50}px ${color}`;
-    document.getElementById('status-text').innerText = pct < 10 ? "STOP" : (pct < 60 ? "ROLLING" : "DANGER!!");
-    document.getElementById('status-text').style.color = color;
+    if (Math.random() < playChance) {
+        // ランダムにスケールから音を選ぶ
+        // actが高いほど、高い音が選ばれやすくする
+        const range = Math.floor(act * 5); 
+        const idx = Math.floor(Math.random() * 5) + noteIndexOffset + range;
+        
+        // スケール外にはみ出さない処理
+        const note = scale[Math.min(idx, scale.length - 1)];
+        leadSynth.triggerAttackRelease(note, noteDuration, time);
+    }
 }
 
+// ==========================================
+// 5. 更新ループ (センサー & 画面 & パラメータ)
+// ==========================================
+function update() {
+    requestAnimationFrame(update);
+    if(!isPlaying) return;
+
+    // スムージング
+    smoothedActivity += (activity - smoothedActivity) * 0.05;
+
+    // パラメータ連動
+    // 1. BPM変化: 110 -> 160
+    Tone.Transport.bpm.rampTo(110 + (smoothedActivity * 50), 0.1);
+
+    // 2. フィルターの明るさ
+    masterFilter.frequency.rampTo(500 + (smoothedActivity * 8000), 0.1);
+
+    // 画面更新
+    document.getElementById('actVal').innerText = Math.round(smoothedActivity * 100) + "%";
+    
+    // レベル表示
+    const lvlText = document.getElementById('lvlText');
+    const b1 = document.getElementById('b1');
+    const b2 = document.getElementById('b2');
+    const b3 = document.getElementById('b3');
+    const b4 = document.getElementById('b4');
+
+    // バーの高さアニメーション
+    const h = smoothedActivity * 100;
+    b1.style.height = (h * 0.8 + Math.random()*20) + "%";
+    b2.style.height = (h * 1.0 + Math.random()*20) + "%";
+    b3.style.height = (h * 1.2 + Math.random()*20) + "%";
+    b4.style.height = (h * 0.9 + Math.random()*20) + "%";
+
+    if(smoothedActivity < 0.3) {
+        lvlText.innerText = "WALK";
+        lvlText.style.color = "#00d1b2"; // Green
+    } else if(smoothedActivity < 0.7) {
+        lvlText.innerText = "RUN";
+        lvlText.style.color = "#ffdd57"; // Yellow
+    } else {
+        lvlText.innerText = "DASH!!";
+        lvlText.style.color = "#ff0055"; // Red
+    }
+}
 
 // ==========================================
-// 5. センサー処理
+// 6. センサー入力
 // ==========================================
 function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
     if (!a) return;
-
-    // ベクトルの大きさ変化量を見る（ハイパスフィルタ的な処理）
-    // 直前の値との差分をとることで「動きの変化」を抽出
+    
+    // 変化量を簡易計算 (ハイパス的な挙動)
     const x = a.x || 0; const y = a.y || 0; const z = a.z || 0;
     const mag = Math.sqrt(x*x + y*y + z*z);
     
     motionBuffer.push(mag);
-    if (motionBuffer.length > MOTION_BUFFER_SIZE) motionBuffer.shift();
+    if(motionBuffer.length > BUFFER_SIZE) motionBuffer.shift();
 
-    // 標準偏差(バラつき)を計算 = 揺れの激しさ
+    // 標準偏差
     const mean = motionBuffer.reduce((a,b)=>a+b,0) / motionBuffer.length;
     const variance = motionBuffer.reduce((a,b)=>a+Math.pow(b-mean,2),0) / motionBuffer.length;
     const stdDev = Math.sqrt(variance);
 
-    // 感度調整: 0.0〜1.0に正規化
-    // 激しく振ると stdDev は 5〜8 くらい行く
-    const inputVal = Math.min(stdDev / 6.0, 1.0);
-    
-    currentActivity = inputVal;
+    // 感度調整 (0.0 - 1.0)
+    activity = Math.min(stdDev / 6.0, 1.0);
 }
 
 // ==========================================
-// 6. 初期化
+// 7. 開始処理
 // ==========================================
-const btn = document.getElementById('startBtn');
-
-btn.addEventListener('click', async () => {
+document.getElementById('playBtn').addEventListener('click', async () => {
     // iOS Permission
     if (typeof DeviceMotionEvent.requestPermission === 'function') {
         const state = await DeviceMotionEvent.requestPermission();
-        if (state !== 'granted') { alert("センサー許可が必要です"); return; }
+        if (state !== 'granted') return alert("センサー許可が必要です");
     }
     
     window.addEventListener('devicemotion', handleMotion);
-    
     await Tone.start();
-    setupAudio();
-    startSequencer();
-    updateLoop();
     
-    btn.style.display = 'none';
+    setupAudio();
+    startLoop();
+    
+    isPlaying = true;
+    update();
+    
+    document.getElementById('playBtn').style.display = 'none';
 });
 
 </script>
