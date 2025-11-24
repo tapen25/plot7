@@ -3,187 +3,189 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Russian Gizmo Beat</title>
+    <title>Russian Hardbass Engine</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
-        body { font-family: 'Courier New', sans-serif; background: #000; color: #fff; text-align: center; padding: 20px; overflow: hidden; user-select: none; }
+        body { 
+            font-family: sans-serif; 
+            background: #111; 
+            color: #ccc; 
+            text-align: center; 
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 80vh;
+        }
         
         #playBtn {
-            margin-top: 35vh;
-            padding: 25px 50px; font-size: 1.5rem; font-weight: 900;
-            color: #000; background: #ff3333;
-            border: 5px solid #fff; text-transform: uppercase;
-            box-shadow: 10px 10px 0px #fff; transition: transform 0.1s;
+            padding: 20px 60px; 
+            font-size: 1.5rem; 
+            font-weight: bold;
+            background: #333; 
+            color: #fff; 
+            border: 2px solid #555; 
+            border-radius: 8px;
             cursor: pointer;
         }
-        #playBtn:active { transform: translate(5px, 5px); box-shadow: 5px 5px 0px #fff; }
-
-        .hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         
-        .beat-indicator {
-            font-size: 5rem; font-weight: bold; opacity: 0; transform: scale(0.5);
-            transition: transform 0.1s; text-shadow: 0 0 20px #ff0000;
+        .status-container {
+            margin-top: 40px;
+            border: 1px solid #333;
+            padding: 20px;
+            width: 80%;
+            max-width: 400px;
+            background: #000;
         }
 
-        .status { position: absolute; bottom: 30px; font-size: 1.2rem; }
-        
-        /* 背景演出 */
-        #bg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.3; }
-        
-        /* 鳥（静寂時） */
-        .bird { position: absolute; width: 5px; height: 5px; background: #0ff; border-radius: 50%; opacity: 0; transition: opacity 0.5s; }
+        .label { font-size: 0.9rem; color: #666; margin-bottom: 5px; }
+        .value { font-size: 2rem; font-weight: bold; color: #fff; font-family: monospace; }
+        #bpmVal { color: #ff3333; }
     </style>
 </head>
 <body>
 
-    <div class="hud">
-        <div class="beat-indicator" id="boom">BOOM</div>
-        <div class="status">SPEED: <span id="speedVal">0</span>%</div>
+    <button id="playBtn">SYSTEM START</button>
+
+    <div class="status-container">
+        <div class="label">STATUS</div>
+        <div class="value" id="statusText">STANDBY</div>
+        <br>
+        <div class="label">BPM</div>
+        <div class="value" id="bpmVal">---</div>
+        <br>
+        <div class="label">INTENSITY</div>
+        <div class="value" id="speedVal">0%</div>
     </div>
-    
-    <canvas id="bg-canvas"></canvas>
-    <button id="playBtn">START MISSION</button>
 
 <script>
 // ==========================================
-// 1. 設定 & 変数
+// 1. 変数定義
 // ==========================================
 let isPlaying = false;
 let smoothedActivity = 0.0;
 const motionBuffer = [];
-let canvas, ctx;
 
-// ハーモニックマイナー (A Harmonic Minor: 哀愁と激しさ)
-// A, B, C, D, E, F, G#, A
-const scaleNotes = ["A3", "B3", "C4", "D4", "E4", "F4", "G#4", "A4", "B4", "C5", "D5", "E5"];
+// A Harmonic Minor Scale (A, B, C, D, E, F, G#, A)
+// ロシアン・ハードベースによくある哀愁漂うスケール
+const scaleNotes = ["A3", "B3", "C4", "D4", "E4", "F4", "G#4", "A4"];
 
-// コード進行: Am -> Dm -> E7 -> Am (王道のロシアンフォーク進行)
-const chordProgression = [
-    ["A3", "C4", "E4"],     // Am
-    ["D3", "F3", "A3"],     // Dm
-    ["E3", "G#3", "B3"],    // E7 (重要: G#がポイント)
-    ["A3", "C4", "E4"]      // Am
+// コード進行: Am -> Dm -> E -> Am
+const progression = [
+    ["A2", "A3"], // Am (Root Octaves)
+    ["D2", "D3"], // Dm
+    ["E2", "E3"], // E
+    ["A2", "A3"]  // Am
 ];
 
 // ==========================================
-// 2. 音源セットアップ
+// 2. 音源セットアップ (Beat Emphasis Tuning)
 // ==========================================
-let kick, snare, donkBass, leadSynth, birdSynth, birdPan, windNode, windGain;
-let distortion, lowPass;
+let kick, snare, donkBass, leadSynth, hihat;
+let masterLimiter, distortion;
 
 function setupAudio() {
-    const masterLimiter = new Tone.Limiter(-1).toDestination();
+    masterLimiter = new Tone.Limiter(-0.5).toDestination();
     
-    // エフェクト: 速度が上がると歪む
+    // 歪みエフェクト（Activityに応じて強くなる）
     distortion = new Tone.Distortion(0).connect(masterLimiter);
-    lowPass = new Tone.Filter(200, "lowpass").connect(distortion);
 
-    // 1. Hardbass Kick (硬いキック)
+    // 1. Hard Kick: アタックを強調し、よりタイトに
     kick = new Tone.MembraneSynth({
         pitchDecay: 0.05,
-        octaves: 10,
+        octaves: 8, // ピッチ変化を大きくしてパンチを出す
         oscillator: { type: "sine" },
-        envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 },
-        volume: 0
-    }).connect(masterLimiter); // キックはローパス通さず直接叩く
+        envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.8 },
+        volume: 2 // 他より少し大きく
+    }).connect(masterLimiter);
 
-    // 2. Snare (クラップ気味)
-    snare = new Tone.NoiseSynth({
-        noise: { type: "white" },
-        envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
-        volume: -10
-    }).connect(lowPass);
-
-    // 3. Donk Bass (ロシアンビート特有の硬いベース)
+    // 2. Donk Bass: ロシアンビートの象徴「土管のような音」
     donkBass = new Tone.FMSynth({
-        harmonicity: 3,
-        modulationIndex: 10,
+        harmonicity: 3.01, // 少しズラして金属感を出す
+        modulationIndex: 15,
         detune: 0,
         oscillator: { type: "sine" },
-        envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.1 },
+        envelope: { attack: 0.001, decay: 0.3, sustain: 0.1, release: 0.1 },
         modulation: { type: "square" },
-        modulationEnvelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 },
-        volume: -2
-    }).connect(lowPass);
+        modulationEnvelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.1 },
+        volume: 0
+    }).connect(distortion);
 
-    // 4. Lead Synth (メロディ)
-    leadSynth = new Tone.Synth({
-        oscillator: { type: "square" }, // ファミコンっぽい矩形波
-        envelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.1 },
+    // 3. Snare: クラップ音に近いノイズ
+    snare = new Tone.NoiseSynth({
+        noise: { type: "white" },
+        envelope: { attack: 0.001, decay: 0.15, sustain: 0 },
         volume: -8
-    }).connect(lowPass);
+    }).connect(distortion);
 
-    // 5. Bird (静寂用)
-    birdPan = new Tone.Panner(0).connect(masterLimiter);
-    birdSynth = new Tone.Synth({
-        oscillator: { type: "sine" },
-        envelope: { attack: 0.02, decay: 0.1, sustain: 0, release: 0.1 },
+    // 4. Hi-hat: チキチキ音
+    hihat = new Tone.MetalSynth({
+        frequency: 200,
+        envelope: { attack: 0.001, decay: 0.05, release: 0.05 },
+        harmonicity: 5.1,
+        modulationIndex: 32,
+        resonance: 4000,
+        octaves: 1.5,
         volume: -15
-    }).connect(birdPan);
+    }).connect(distortion);
 
-    // 6. Wind (控えめ)
-    const windFilter = new Tone.Filter(400, "bandpass");
-    windGain = new Tone.Gain(0).connect(masterLimiter);
-    windNode = new Tone.Noise("pink").connect(windFilter).connect(windGain);
-    windNode.start();
+    // 5. Lead: 矩形波でチープかつ激しく
+    leadSynth = new Tone.Synth({
+        oscillator: { type: "square" },
+        envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.1 },
+        volume: -10
+    }).connect(distortion);
 }
 
 // ==========================================
-// 3. ループ & ロジック
+// 3. シーケンサー (Rhythm & Logic)
 // ==========================================
 let tick = 0;
 
 function startLoop() {
-    Tone.Transport.bpm.value = 140; // ロシアンハードベースの基本BPM
+    // 初期BPM
+    Tone.Transport.bpm.value = 90;
 
     Tone.Transport.scheduleRepeat((time) => {
         const act = smoothedActivity;
         const beat16 = tick % 16;
+        const beat4 = tick % 4;
         const barIdx = Math.floor(tick / 16) % 4;
         
-        // --- 演出制御 ---
-        // キックに合わせて画面を揺らす (Visual Pump)
-        if (beat16 % 4 === 0 && act > 0.3) bumpVisual("BOOM");
-        if (beat16 % 4 === 2 && act > 0.6) bumpVisual("CHA"); // 裏拍
-
-        // --- 1. 鳥 (Activity < 0.2) ---
-        if (act < 0.2) {
-            if (Math.random() < 0.05) playBird();
+        // --- A. KICK (心臓部) ---
+        // 常に4つ打ち。Activityが低いときは重く、高いときは短く鳴らすなどの変化も可能だが、
+        // ハードベースは「変わらない強さ」が重要なので一定に。
+        if (beat4 === 0) {
+            kick.triggerAttackRelease("A1", "8n", time);
         }
 
-        // --- 2. リズムセクション (The Russian Beat) ---
-        
-        // KICK: 4つ打ち (Don - Don - Don - Don)
-        if (beat16 % 4 === 0) {
-            // 静止時でも心臓の鼓動のように鳴らす
-            kick.triggerAttackRelease("C1", "8n", time, act < 0.2 ? 0.5 : 1);
-        }
-
-        // BASS: 裏打ち ( - Donk - Donk - Donk)
-        // これが入ると一気に「走ってる感」が出る
+        // --- B. BASS (裏打ちの強調) ---
+        // Activity > 0.3 で裏打ち開始。
+        // ここが「BPMの変化」を感じさせる最大のポイント。
         if (act > 0.3) {
-            if (beat16 % 4 === 2) { // 典型的裏打ち
-                const root = chordProgression[barIdx][0].replace("3", "2");
-                donkBass.triggerAttackRelease(root, "8n", time);
+            if (beat4 === 2) { // 典型的裏打ち (Don - [DONK] - Don - [DONK])
+                const note = progression[barIdx][0]; // Root note
+                donkBass.triggerAttackRelease(note, "8n", time);
             }
-        }
-
-        // SNARE: 2拍4拍
-        if (act > 0.5 && beat16 % 8 === 4) {
-            snare.triggerAttackRelease("8n", time);
         }
         
-        // DASH MODE: 16分ベース追加
-        if (act > 0.8) {
-            // 隙間を埋めるベース
-            if (beat16 % 2 !== 0) {
-                 const root = chordProgression[barIdx][0].replace("3", "2");
-                 donkBass.triggerAttackRelease(root, "16n", time, 0.5);
+        // --- C. SNARE & HIHAT ---
+        // 勢いづけ
+        if (act > 0.5) {
+            if (beat16 % 8 === 4) { // 2拍目と4拍目
+                snare.triggerAttackRelease("8n", time);
+            }
+            if (beat4 === 2) { // 裏打ちハイハット
+                hihat.triggerAttackRelease("32n", time);
             }
         }
 
-        // --- 3. メロディ (Tetris Style Arpeggio) ---
-        playRussianMelody(time, act, beat16, barIdx);
+        // --- D. MELODY ---
+        // テトリスっぽいフレーズを生成
+        if (act > 0.2) {
+            playMelody(time, act, beat16, barIdx);
+        }
 
         tick++;
     }, "16n");
@@ -191,158 +193,109 @@ function startLoop() {
     Tone.Transport.start();
 }
 
-function playRussianMelody(time, act, beat, barIdx) {
-    if (act < 0.3) return; // 静寂時はメロディなし
-
-    let chance = 0;
-    let duration = "8n";
-
-    // アルペジオパターン定義 (コードトーン + 経過音)
-    // Aハーモニックマイナー特有の "G#" を意識
-    const currentChordNotes = chordProgression[barIdx];
+function playMelody(time, act, beat, barIdx) {
+    let playChance = 0;
     
-    // 普通: 8分音符でポルカ調
-    if (act < 0.7) {
-        if (beat % 2 === 0 && Math.random() < 0.8) {
-             // コードトーンをランダムに
-             const n = currentChordNotes[Math.floor(Math.random()*currentChordNotes.length)];
-             leadSynth.triggerAttackRelease(n, "8n", time);
+    // 静: メロディなし
+    if (act < 0.4) return;
+
+    // 動: 8分音符でランダム
+    if (act < 0.8) {
+        if (beat % 2 === 0 && Math.random() < 0.7) {
+            // スケールからランダム
+            const n = scaleNotes[Math.floor(Math.random() * 4)]; // 低めの音
+            leadSynth.triggerAttackRelease(n, "8n", time);
         }
     } 
-    // 激しい: 16分音符の高速アルペジオ (駆け上がり/駆け下り)
+    // 激: 16分音符で駆け上がり
     else {
-        // 常に鳴らす
-        const noteIdx = tick % 4; // 4音周期
-        // 現在のコードの構成音 + オクターブ上
-        let baseNote = currentChordNotes[noteIdx % 3]; 
-        if (noteIdx === 3) baseNote = Tone.Frequency(currentChordNotes[1]).transpose(12); // 跳躍
-        
-        leadSynth.triggerAttackRelease(baseNote, "16n", time);
+        // アルペジオ
+        const idx = tick % 8;
+        const n = scaleNotes[idx]; 
+        leadSynth.triggerAttackRelease(n, "16n", time);
     }
 }
 
-// 鳥の再生
-function playBird() {
-    birdPan.pan.value = (Math.random() * 2) - 1;
-    const freq = 1500 + Math.random() * 1000;
-    birdSynth.triggerAttackRelease(freq, "32n");
-    birdSynth.frequency.rampTo(freq + 500, 0.1);
-    
-    // 視覚
-    const b = document.createElement('div');
-    b.className = 'bird';
-    b.style.left = Math.random()*100 + '%';
-    b.style.top = Math.random()*80 + '%';
-    document.body.appendChild(b);
-    setTimeout(()=> b.style.opacity = 1, 10);
-    setTimeout(()=> b.remove(), 600);
-}
-
-// ビートビジュアル
-const boomText = document.getElementById('boom');
-function bumpVisual(text) {
-    boomText.innerText = text;
-    boomText.style.opacity = 1;
-    boomText.style.transform = "scale(1.2)";
-    setTimeout(() => {
-        boomText.style.opacity = 0;
-        boomText.style.transform = "scale(0.5)";
-    }, 100);
-}
-
 // ==========================================
-// 4. 更新ループ
+// 4. 更新ループ (パラメータ制御)
 // ==========================================
 function update() {
     requestAnimationFrame(update);
     if(!isPlaying) return;
 
-    // センサー値のスムージング
+    // センサー値スムージング
     const raw = motionBuffer.length ? motionBuffer[motionBuffer.length-1] : 0;
     smoothedActivity += (raw - smoothedActivity) * 0.1;
 
-    // --- パラメータ連動 ---
-    
-    // 1. BPM: 130 (重い) -> 170 (高速)
-    const targetBpm = 130 + (smoothedActivity * 50);
-    Tone.Transport.bpm.rampTo(targetBpm, 0.1);
+    // --- BPM制御 (修正ポイント) ---
+    // 90 (Walk) 〜 170 (Sprint)
+    // 変化の幅を大きくし、少し動くだけで130くらいまで一気に上がるカーブにする
+    // Math.powを使うことで「頑張って振ると急激に速くなる」演出
+    const curve = Math.pow(smoothedActivity, 0.8); // 直線より少し早めに立ち上がる
+    const targetBpm = 90 + (curve * 80); 
+    Tone.Transport.bpm.rampTo(targetBpm, 0.2); // 追従速度を少し速く(0.2s)
 
-    // 2. フィルター & 歪み (Activityと共に開く＆歪む)
-    // 静寂(200Hz) -> 全開(5000Hz)
-    const freq = 200 + Math.pow(smoothedActivity, 3) * 5000; 
-    lowPass.frequency.rampTo(freq, 0.1);
-    
-    // Distortion: 0 -> 0.4
-    distortion.distortion = Math.max(0, (smoothedActivity - 0.5) * 0.8);
+    // --- 音色制御 ---
+    // 激しくなると少し音が歪んで攻撃的になる
+    distortion.distortion = Math.max(0, (smoothedActivity - 0.6) * 0.5);
 
-    // 3. 風音量 (控えめ: Max 0.2)
-    const windVol = Math.max(0, (smoothedActivity - 0.2) * 0.2);
-    windGain.gain.rampTo(windVol, 0.1);
-
-    // 表示
-    document.getElementById('speedVal').innerText = Math.round(smoothedActivity * 100);
+    // --- 表示更新 ---
+    document.getElementById('bpmVal').innerText = Math.round(targetBpm);
+    document.getElementById('speedVal').innerText = Math.round(smoothedActivity * 100) + "%";
     
-    drawBg(smoothedActivity);
-}
-
-// 背景描画 (サイケデリックなグリッド)
-function drawBg(act) {
-    ctx.fillStyle = 'rgba(0,0,0,0.1)';
-    ctx.fillRect(0,0,canvas.width, canvas.height);
+    const statusText = document.getElementById('statusText');
+    if (smoothedActivity < 0.3) statusText.innerText = "SNEAKING";
+    else if (smoothedActivity < 0.7) statusText.innerText = "MOVING";
+    else statusText.innerText = "HARD BASS!!";
     
-    const time = Date.now() / 1000;
-    ctx.strokeStyle = act > 0.6 ? `hsl(${time * 500 % 360}, 100%, 50%)` : '#00ffaa';
-    ctx.lineWidth = 1 + act * 5;
-    
-    ctx.beginPath();
-    // 速度に応じて歪むグリッド
-    const speed = time * (1 + act * 10);
-    const offset = (speed % 1) * 100;
-    
-    for(let y=0; y<canvas.height; y+=100) {
-        ctx.moveTo(0, y + offset);
-        ctx.lineTo(canvas.width, y + offset);
+    // 文字色変化
+    if (smoothedActivity > 0.7) {
+        statusText.style.color = "#ff3333";
+        document.body.style.borderColor = "#ff3333";
+    } else {
+        statusText.style.color = "#fff";
+        document.body.style.borderColor = "#333";
     }
-    // 放射状の線
-    const cx = canvas.width/2; 
-    const cy = canvas.height/2;
-    for(let i=0; i<8; i++) {
-        const angle = (i/8) * Math.PI * 2 + (act * time);
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(cx + Math.cos(angle)*1000, cy + Math.sin(angle)*1000);
-    }
-    ctx.stroke();
 }
 
 // ==========================================
-// 5. 初期化
+// 5. センサー入力
 // ==========================================
-canvas = document.getElementById('bg-canvas');
-ctx = canvas.getContext('2d');
-const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
-window.onresize = resize; resize();
-
 function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
     if (!a) return;
-    const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+    const x = a.x || 0; const y = a.y || 0; const z = a.z || 0;
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    
+    // 9.8(重力)を引いて純粋な動きの量を取る
     const shake = Math.abs(mag - 9.8);
+    
+    // 感度調整: 激しく振って 1.0 になるように
     const normalized = Math.min(shake / 6.0, 1.0);
+    
     motionBuffer.push(normalized);
     if(motionBuffer.length > 10) motionBuffer.shift();
 }
 
+// ==========================================
+// 6. 開始処理
+// ==========================================
 document.getElementById('playBtn').addEventListener('click', async () => {
+    // iOS Permission
     if (typeof DeviceMotionEvent.requestPermission === 'function') {
         const state = await DeviceMotionEvent.requestPermission();
         if (state !== 'granted') return alert("センサー許可が必要です");
     }
+    
     window.addEventListener('devicemotion', handleMotion);
     await Tone.start();
+    
     setupAudio();
     startLoop();
+    
     isPlaying = true;
     update();
+    
     document.getElementById('playBtn').style.display = 'none';
 });
 </script>
