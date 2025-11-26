@@ -3,46 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Electro Motion Music</title>
+    <title>Stylish Wind Walk</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
-        body { font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center; padding: 20px; background: #1a1a2e; color: #fff; }
-        h1 { color: #e94560; font-weight: 300; letter-spacing: 2px; }
+        body { font-family: 'Gill Sans', sans-serif; text-align: center; padding: 20px; background: #0f172a; color: #fff; }
+        h1 { color: #38bdf8; font-weight: 200; letter-spacing: 4px; text-transform: uppercase; }
         
         #startBtn { 
-            padding: 20px 40px; font-size: 1.2rem; background: #16213e; 
-            border: 2px solid #0f3460; border-radius: 5px; color: #fff; 
-            cursor: pointer; margin-top: 20px; transition: 0.3s;
+            padding: 20px 50px; font-size: 1.1rem; background: transparent; 
+            border: 1px solid #38bdf8; border-radius: 0; color: #38bdf8; 
+            cursor: pointer; margin-top: 30px; letter-spacing: 2px; transition: 0.3s;
         }
-        #startBtn:active { background: #e94560; border-color: #e94560; }
+        #startBtn:hover { background: #38bdf8; color: #000; box-shadow: 0 0 20px #38bdf8; }
         
-        #status { margin-top: 40px; display: inline-block; text-align: left; background: #16213e; padding: 30px; border-radius: 10px; min-width: 280px; }
-        .row { margin-bottom: 15px; border-bottom: 1px solid #0f3460; padding-bottom: 5px; }
-        .label { font-size: 0.8rem; color: #533483; text-transform: uppercase; letter-spacing: 1px; }
-        .value { font-size: 1.5rem; color: #e94560; font-family: monospace; float: right; }
+        #status { margin-top: 50px; display: inline-block; width: 80%; max-width: 400px; }
+        .bar-container { background: #1e293b; height: 10px; margin: 20px 0; position: relative; width: 100%; }
+        .bar { height: 100%; transition: width 0.2s; }
+        #windBar { background: linear-gradient(90deg, #38bdf8, #fff); width: 0%; }
+        #styleBar { background: linear-gradient(90deg, #a855f7, #ec4899); width: 0%; }
         
-        #visual { height: 4px; width: 0%; background: #e94560; margin: 20px auto; transition: width 0.2s; border-radius: 2px;}
-        #desc { font-size: 0.9rem; color: #aaa; margin-top: 10px; font-style: italic; }
+        .label { font-size: 0.8rem; color: #94a3b8; display: flex; justify-content: space-between; }
+        #styleText { color: #ec4899; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h1>Electro Walk</h1>
-    <p>歩き出すとビートが始まり、<br>続けると世界が広がります。</p>
-    <button id="startBtn">SYSTEM START</button>
+    <h1>Aero Walk</h1>
+    <p>Speed creates Wind. Time creates Style.</p>
+    <button id="startBtn">INITIALIZE</button>
     
-    <div id="visual"></div>
-
     <div id="status">
-        <div class="row">
-            <span class="label">Motion (Beat)</span>
-            <span id="actVal" class="value">0.00</span>
-        </div>
-        <div class="row">
-            <span class="label">Story (Brightness)</span>
-            <span id="storyVal" class="value">0%</span>
-        </div>
-        <div id="desc">待機中...</div>
+        <div class="label"><span>WIND VELOCITY (Movement)</span></div>
+        <div class="bar-container"><div id="windBar" class="bar"></div></div>
+        
+        <div class="label"><span>STYLE LEVEL (Duration)</span><span id="styleText">Mono</span></div>
+        <div class="bar-container"><div id="styleBar" class="bar"></div></div>
     </div>
 
 <script>
@@ -51,160 +46,145 @@
 // ==========================================
 const BUFFER_SIZE = 20; 
 const motionBuffer = []; 
-let targetActivity = 0.0; 
-let activity = 0.0;       
-let accumulatedEnergy = 0.0; // ストーリー進行度 (0-100)
+let activity = 0.0;       // 瞬発値 (風、ドラムON/OFF)
+let targetActivity = 0.0;
+let styleLevel = 0.0;     // 蓄積値 (ハモり、音色変化)
 let smoothedVariance = 0.0; 
 
-let motionListenerAttached = false;
+// ==========================================
+// 2. 音楽理論データ (おしゃれなCマイナー・ドリアン)
+// ==========================================
+// C Minor 7 / F7 / Eb Maj7 等を想定したスケール
+const scale = ["C4","D4","Eb4","F4","G4","A4","Bb4","C5","D5","Eb5"];
 
 // ==========================================
-// 2. 音楽データ (都会的なコード進行)
+// 3. シンセサイザー (爽快感 & グルーヴ重視)
 // ==========================================
-// エレクトロな雰囲気に合う、少し浮遊感のあるコード
-const chords = [
-  ["C3","E3","G3","B3"], // CM7
-  ["B2","D3","F#3","A3"], // Bm7
-  ["E3","G3","B3","D4"], // Em7
-  ["A2","C3","E3","G3"], // Am7
-  ["F2","A2","C3","E3"], // FM7
-  ["G2","B2","D3","F3"], // G7
-  ["E2","G#2","B2","D3"], // E7 (アクセント)
-  ["A2","C3","E3","A3"]  // Am
-];
-
-// ペンタトニック + ブルーノート
-const scale = ["C4","D4","D#4","E4","G4","A4","B4","C5"];
-
-// ==========================================
-// 3. シンセサイザー設定
-// ==========================================
-let chordSynth, melodySynth, kick, snare, hihat;
-let filter, delay, reverb;
+let windSynth, windFilter, windPanner;
+let bassSynth, drumKit;
+let leadSynth;
+let delay, reverb;
 
 function setupSynths() {
-    // 空間系エフェクト
-    reverb = new Tone.Reverb({ decay: 5, wet: 0.3 }).toDestination();
+    // 空間系: 広がりを持たせる
+    reverb = new Tone.Reverb({ decay: 3, wet: 0.4 }).toDestination();
     delay = new Tone.PingPongDelay("8n.", 0.2).connect(reverb);
+
+    // --- A. 風の音 (爽快感のコア) ---
+    // ピンクノイズをフィルタリングして風を作る
+    windSynth = new Tone.Noise("pink").start();
+    windFilter = new Tone.Filter({ type: "bandpass", Q: 1 }); 
+    windPanner = new Tone.Panner3D({ panningModel: "HRTF" }); // 立体音響
     
-    // 【ストーリー制御の肝】ローパスフィルター
-    // accumulatedEnergyによって、こもった音から明るい音へ開いていく
-    filter = new Tone.Filter(400, "lowpass", -12).connect(delay);
+    // 接続: Noise -> Filter -> Panner -> Out
+    windSynth.connect(windFilter);
+    windFilter.connect(windPanner);
+    windPanner.toDestination();
+    windSynth.volume.value = -99; // 最初は無音
 
-    // 1. コード伴奏 (エレクトロピアノ風)
-    // FM変調を使って、キラッとしたアタック感と温かみを両立
-    chordSynth = new Tone.PolySynth(Tone.FMSynth, {
-        volume: -8,
-        harmonicity: 3, // 倍音成分 (エレピっぽさの鍵)
-        modulationIndex: 10,
-        oscillator: { type: "sine" },
-        envelope: { attack: 0.01, decay: 0.5, sustain: 0.8, release: 1 },
-        modulation: { type: "square" },
-        modulationEnvelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.5 }
-    }).connect(filter); // フィルターを通す
-
-    // 2. メロディ (プラック音)
-    melodySynth = new Tone.PolySynth(Tone.Synth, {
+    // --- B. ベース (太く効かせる) ---
+    bassSynth = new Tone.MonoSynth({
         volume: -6,
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1 }
-    }).connect(filter); // メロディもフィルターの影響を受ける
-
-    // 3. リズム隊 (TR-808系)
-    kick = new Tone.MembraneSynth({ 
-        volume: -2,
-        pitchDecay: 0.05,
-        octaves: 4
+        oscillator: { type: "sawtooth" }, // ソウ波でエッジを効かせる
+        filter: { Q: 2, type: "lowpass", rollover: -24, frequency: 400 },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.5 }
     }).toDestination();
 
-    snare = new Tone.NoiseSynth({
-        volume: -10,
-        noise: { type: "white" },
-        envelope: { decay: 0.2 }
-    }).connect(reverb);
+    // --- C. リード (メロディ & ハモり) ---
+    // ポリフォニック(和音)対応
+    leadSynth = new Tone.PolySynth(Tone.Synth, {
+        volume: -8,
+        oscillator: { type: "triangle" }, // 丸いが芯のある音
+        envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 1 }
+    }).connect(delay);
 
-    hihat = new Tone.MetalSynth({
-        volume: -15,
-        frequency: 200,
-        envelope: { decay: 0.05 },
-        harmonicity: 5.1,
-        modulationIndex: 32,
-        resonance: 4000,
-        octaves: 1.5
-    }).connect(reverb);
+    // --- D. ドラム (Groovy) ---
+    drumKit = {
+        kick: new Tone.MembraneSynth({ volume: 0 }).toDestination(), // キック強め
+        snare: new Tone.NoiseSynth({ volume: -8, envelope: { decay: 0.2 } }).connect(reverb),
+        hihat: new Tone.MetalSynth({ volume: -15, frequency: 200, envelope: { decay: 0.05 }, harmonicity: 5.1 }).connect(reverb),
+        openHat: new Tone.MetalSynth({ volume: -15, frequency: 200, envelope: { decay: 0.2 }, harmonicity: 5.1 }).connect(reverb)
+    };
 }
 
 // ==========================================
-// 4. 音楽生成ループ
+// 4. ミュージックループ
 // ==========================================
 function startMusicLoop() {
-    Tone.Transport.bpm.value = 110;
+    Tone.Transport.bpm.value = 115; // 少し早めのウォーキングテンポ
 
-    // --- A. コード進行 (常に鳴るが、明るさが変わる) ---
+    // --- 1. ドラム & ベース (グルーヴの土台) ---
+    // 歩き始めると即座に鳴る
     Tone.Transport.scheduleRepeat((time) => {
-        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        chordSynth.triggerAttackRelease(chords[bar], "1n", time);
-    }, "1n");
+        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
+        
+        if (activity > 0.2) {
+            // Kick (4つ打ち)
+            if (s % 4 === 0) drumKit.kick.triggerAttackRelease("C1", "8n", time);
+            
+            // Bass (裏打ちで疾走感)
+            // 0--x 0--x のようなパターン
+            if (s % 4 === 2) {
+                // ベースラインも少し動かす
+                let note = (s < 8) ? "C2" : "F2"; 
+                bassSynth.triggerAttackRelease(note, "8n", time);
+            }
 
-    // --- B. メロディ (ストーリー進行度で変化) ---
+            // Snare (2,4拍)
+            if (s % 8 === 4) drumKit.snare.triggerAttackRelease("8n", time);
+
+            // Hihat (16ビート)
+            if (s % 2 !== 0) { // 裏
+                if (s % 4 === 2) drumKit.openHat.triggerAttackRelease("32n", time); // オープン
+                else drumKit.hihat.triggerAttackRelease("32n", time); // クローズ
+            }
+        }
+    }, "16n");
+
+    // --- 2. メロディ (レイヤー制御でおしゃれに進化) ---
     let tick = 0;
     Tone.Transport.scheduleRepeat((time) => {
-        const step = tick % 16;
-        
-        // 蓄積エネルギー(0-100)が高いほど、細かい音が鳴りやすくなる
-        // 序盤はロングトーンや休符が多い -> 終盤はアルペジオが走る
-        let density = accumulatedEnergy / 100; // 0.0 ~ 1.0
+        // 歩いているときだけメロディ生成
+        if (activity > 0.25 && tick % 4 === 0) { // 8分音符単位
+            
+            // 確率で鳴らす (ランダム感)
+            if (Math.random() < 0.6) {
+                // 音を選ぶ
+                const index = Math.floor(Math.random() * (scale.length - 2)); // 範囲外エラー防止
+                const rootNote = scale[index];
+                
+                // === ここがレイヤー制御のキモ ===
+                // styleLevel (蓄積値 0-100) に応じて和音を積む
+                const notesToPlay = [rootNote];
 
-        // 動きがあるときだけメロディを判定
-        if (activity > 0.2) {
-            let chance = 0.3; // 基本確率
-            if (density > 0.5) chance = 0.7; // ストーリーが進むと饒舌になる
+                // Lv2 (30%~): ハモり追加 (3度上 or 4度上) -> おしゃれ感
+                if (styleLevel > 30) {
+                    const harmonyNote = scale[index + 2]; // 2つ隣の音(3度/4度)
+                    notesToPlay.push(harmonyNote);
+                }
 
-            // 16分音符のグリッドで鳴らすか判定
-            // densityが低い時は 4分音符(0,4,8,12)のタイミングのみ許可するなどの制限
-            let allowTiming = (density < 0.3) ? (step % 4 === 0) : true;
+                // Lv3 (70%~): オクターブ上のキラキラ装飾 -> 高揚感
+                if (styleLevel > 70) {
+                    if (Math.random() < 0.5) {
+                        const sparkleNote = scale[index + 4]; // 5度〜7度上
+                        // 1オクターブ上げる処理簡易版
+                        // Tone.Frequency(sparkleNote).transpose(12) 的な処理の代用
+                        // ここではスケールの高音域を使用
+                        notesToPlay.push(scale[Math.min(index + 5, scale.length - 1)]);
+                    }
+                }
 
-            if (allowTiming && Math.random() < chance) {
-                // 音の高さも、ストーリーが進むと高音が混ざる
-                let noteIdx = Math.floor(Math.random() * scale.length);
-                if (density < 0.4 && noteIdx > 4) noteIdx -= 4; // 序盤は低め
-
-                const note = scale[noteIdx];
-                const dur = (Math.random() > 0.5) ? "8n" : "16n";
-                melodySynth.triggerAttackRelease(note, dur, time);
+                leadSynth.triggerAttackRelease(notesToPlay, "8n", time);
             }
         }
         tick++;
-    }, "16n");
-
-    // --- C. ドラム (Activity即時連動) ---
-    Tone.Transport.scheduleRepeat((time) => {
-        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
-
-        // Activityが低い(止まっている)とドラムは鳴らない
-        // Activityが高い(歩いている)とドラムが即座に入る
-        if (activity > 0.3) {
-            // Kick (4つ打ち)
-            if (s % 4 === 0) kick.triggerAttackRelease("C1", "8n", time);
-            
-            // Snare (2, 4拍目) - 走ると確率でゴーストノートが入る
-            if (s % 8 === 4) snare.triggerAttackRelease("8n", time);
-            
-            // Hihat (裏打ち)
-            if (s % 2 === 0) hihat.triggerAttackRelease("32n", time);
-            
-            // 走っている(高Activity)なら16分ハット追加
-            if (activity > 0.7 && s % 2 !== 0) {
-                 hihat.triggerAttackRelease("32n", time, 0.3);
-            }
-        }
     }, "16n");
 
     Tone.Transport.start();
 }
 
 // ==========================================
-// 5. センサー & 状態更新
+// 5. センサー処理 & フィードバック
 // ==========================================
 function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
@@ -219,74 +199,73 @@ function handleMotion(event) {
     const mean = motionBuffer.reduce((a,b)=>a+b)/motionBuffer.length;
     const stdDev = Math.sqrt(motionBuffer.reduce((a,b)=>a + Math.pow(b-mean, 2),0)/motionBuffer.length);
 
-    // Activity: 瞬発力
-    targetActivity = Math.min(stdDev / 3.0, 1.0); // 少し感度高め
+    targetActivity = Math.min(stdDev / 4.0, 1.0); 
     smoothedVariance = smoothedVariance * 0.9 + stdDev * 0.1;
 }
 
 function updateLoop() {
-    // 値のスムージング
+    // 1. Activity (瞬発力) のスムーズ化
     activity += (targetActivity - activity) * 0.1;
 
-    // --- ストーリー進行 (Accumulation) ---
-    // 歩いている間だけエネルギーが溜まり、フィルターが開いていく
-    if (activity > 0.3) {
-        accumulatedEnergy += 0.1; // 歩くと増える
+    // 2. 風のエフェクト制御 (Activityに直結)
+    if (activity > 0.1) {
+        // 音量: 動けば鳴る
+        let vol = -40 + (activity * 30); // Max -10dB
+        windSynth.volume.rampTo(vol, 0.1);
+        
+        // フィルター: 速いほど高音成分が通り、「シュッ」という音になる
+        // 200Hz(こもる) -> 3000Hz(鋭い風切り音)
+        let freq = 200 + (activity * 2800);
+        windFilter.frequency.rampTo(freq, 0.1);
     } else {
-        accumulatedEnergy -= 0.05; // 止まると減る
+        windSynth.volume.rampTo(-99, 0.5);
     }
-    accumulatedEnergy = Math.max(0, Math.min(100, accumulatedEnergy));
 
-    // --- 音響パラメータへの反映 ---
+    // 3. スタイルレベル (蓄積値) の制御
+    // 歩いていると「おしゃれ度」が溜まる
+    if (activity > 0.3) {
+        styleLevel += 0.1; 
+    } else {
+        styleLevel -= 0.05; // 止まると徐々に単音に戻る
+    }
+    styleLevel = Math.max(0, Math.min(100, styleLevel));
 
-    // 1. フィルター制御 (ストーリー)
-    // 0% -> 300Hz (こもってる), 100% -> 5000Hz (きらびやか)
-    const freq = 300 + (accumulatedEnergy * 40); 
-    filter.frequency.rampTo(freq, 0.1);
-
-    // 2. ディレイ/リバーブ制御 (ストーリー)
-    // ストーリーが進むと空間が広がる
-    delay.wet.rampTo(accumulatedEnergy / 200, 0.1); // 最大0.5
-
-    // 3. BPM制御 (歩行同期)
-    // 揺れに合わせてBPM 100~130
-    let targetBpm = 100 + (smoothedVariance * 6);
-    targetBpm = Math.max(90, Math.min(135, targetBpm));
+    // 4. BPM制御 (歩行同期)
+    let targetBpm = 110 + (smoothedVariance * 5);
+    targetBpm = Math.max(100, Math.min(130, targetBpm));
     Tone.Transport.bpm.rampTo(targetBpm, 0.5);
 
     // --- UI更新 ---
-    document.getElementById('actVal').innerText = activity.toFixed(2);
-    document.getElementById('storyVal').innerText = Math.floor(accumulatedEnergy) + "%";
-    document.getElementById('visual').style.width = accumulatedEnergy + "%";
-
-    const desc = document.getElementById('desc');
-    if (activity < 0.3) desc.innerText = "停止中: こもった音 (待機)";
-    else if (accumulatedEnergy < 50) desc.innerText = "歩行開始: ビートON + シンプルな音";
-    else desc.innerText = "没入中: 明るい音色 + 複雑なメロディ";
+    document.getElementById('windBar').style.width = (activity * 100) + "%";
+    document.getElementById('styleBar').style.width = styleLevel + "%";
+    
+    const txt = document.getElementById('styleText');
+    if (styleLevel < 30) txt.innerText = "Mono (Simple)";
+    else if (styleLevel < 70) txt.innerText = "Harmony (Stylish)";
+    else txt.innerText = "Ensemble (Sparkle!)";
 
     requestAnimationFrame(updateLoop);
 }
 
 // ==========================================
-// 6. 初期化
+// 6. 開始処理
 // ==========================================
 const btn = document.getElementById('startBtn');
 
 btn.addEventListener('click', async () => {
-    // センサー権限リクエスト
+    // iOS Permission
     if (typeof DeviceMotionEvent.requestPermission === 'function') {
         try {
-            const permissionState = await DeviceMotionEvent.requestPermission();
-            if (permissionState !== 'granted') return alert("センサー許可が必要です");
+            const p = await DeviceMotionEvent.requestPermission();
+            if (p !== 'granted') return alert("センサー許可が必要です");
         } catch (e) { return alert(e); }
     }
     window.addEventListener('devicemotion', handleMotion);
-    motionListenerAttached = true;
 
     await Tone.start();
     setupSynths();
 
-    btn.innerText = "RUNNING...";
+    btn.innerText = "WALKING MODE ON";
     btn.style.opacity = 0.5;
     startMusicLoop();
     updateLoop();
