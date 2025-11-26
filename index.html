@@ -3,17 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nature to Speed v2</title>
+    <title>Nature to Speed (Kick & BPM Mod)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #1a1a24; color: #fff; text-align: center; padding: 20px; overflow: hidden; user-select: none; }
-        #playBtn { margin-top: 35vh; padding: 20px 60px; font-size: 1.2rem; font-weight: bold; color: #fff; background: linear-gradient(135deg, #20c997, #0077ff); border: none; border-radius: 50px; box-shadow: 0 0 20px rgba(32, 201, 151, 0.5); transition: transform 0.1s; }
+        
+        #playBtn {
+            margin-top: 35vh;
+            padding: 20px 60px; font-size: 1.2rem; font-weight: bold;
+            color: #fff; background: linear-gradient(135deg, #20c997, #0077ff);
+            border: none; border-radius: 50px;
+            box-shadow: 0 0 20px rgba(32, 201, 151, 0.5); transition: transform 0.1s;
+        }
         #playBtn:active { transform: scale(0.95); }
+
         .hud { position: absolute; top: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 10; pointer-events: none;}
         .status-label { font-size: 1.5rem; font-weight: bold; letter-spacing: 2px; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .sub-label { font-size: 0.9rem; color: #aaa; font-family: monospace; }
-        #bg-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -2; background: linear-gradient(to bottom, #87CEEB, #E0F7FA); opacity: 0.8; transition: background 1s; }
-        .bird-visual { position: absolute; width: 10px; height: 10px; background: #fff; border-radius: 50%; opacity: 0; transition: opacity 0.5s; pointer-events: none; }
+
+        #bg-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -2;
+            background: linear-gradient(to bottom, #87CEEB, #E0F7FA);
+            opacity: 0.8; transition: background 1s;
+        }
+        
+        .bird-visual {
+            position: absolute; width: 10px; height: 10px; background: #fff; border-radius: 50%;
+            opacity: 0; transition: opacity 0.5s; pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -64,7 +81,7 @@ function setupAudio() {
     const limiter = new Tone.Limiter(-0.5).toDestination();
     const reverb = new Tone.Reverb({ decay: 2, wet: 0.3 }).connect(limiter);
 
-    // A. 楽器類
+    // 楽器類（元の構成のまま）
     leadSynth = new Tone.Synth({
         oscillator: { type: "triangle" },
         envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.5 },
@@ -83,29 +100,19 @@ function setupAudio() {
         volume: -6
     }).connect(limiter);
 
-    // ★変更点: キックの音作りとセットアップ
     drumKit = {
-        // キック音をより太く、音量を上げる (-4 -> 0)
-        kick: new Tone.MembraneSynth({
-            pitchDecay: 0.05,
-            octaves: 4,
-            oscillator: { type: "sine" },
-            envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 },
-            volume: 0 
-        }).connect(limiter),
-        
-        hat: new Tone.MetalSynth({ 
-            frequency: 200, envelope: { decay: 0.05 }, volume: -22 
-        }).connect(limiter)
+        // キックの音量は少し聞こえやすく調整 (volume: -4 -> 0)
+        kick: new Tone.MembraneSynth({ volume: 0 }).connect(limiter),
+        hat: new Tone.MetalSynth({ frequency: 200, envelope: { decay: 0.05 }, volume: -22 }).connect(limiter)
     };
 
-    // B. 風
+    // 風
     windFilter = new Tone.Filter({ type: "bandpass", frequency: 200, Q: 0.5 });
     windGain = new Tone.Gain(0).connect(limiter);
     windNode = new Tone.Noise("pink").connect(windFilter).connect(windGain);
     windNode.start();
 
-    // C. 鳥
+    // 鳥
     birdPan = new Tone.Panner(0).connect(reverb);
     birdSynth = new Tone.Synth({
         oscillator: { type: "sine" },
@@ -121,8 +128,10 @@ function triggerBird() {
     birdPan.pan.value = (Math.random() * 2) - 1;
     const freq = 1000 + Math.random() * 2000;
     const now = Tone.now();
+    
     birdSynth.triggerAttackRelease(freq, "32n", now);
     birdSynth.frequency.rampTo(freq + 500, 0.05, now);
+
     if (Math.random() > 0.5) {
         birdSynth.triggerAttackRelease(freq + 200, "32n", now + 0.1);
     }
@@ -146,52 +155,60 @@ function showBirdVisual() {
 let tick = 0;
 
 function startLoop() {
-    // 初期BPM
-    Tone.Transport.bpm.value = 80;
+    Tone.Transport.bpm.value = 80; // 初期BPM
 
     Tone.Transport.scheduleRepeat((time) => {
         const intensity = smoothedActivity; 
         
-        const beat16 = tick % 16;      // 0〜15 (16分音符)
-        const beat4  = tick % 4;       // 0〜3  (4分音符のタイミング判定用: 0なら表拍)
+        const beat16 = tick % 16;
         const barIndex = Math.floor(tick / 16) % 4;
         const currentChord = chords[barIndex];
 
-        // --- 1. 鳥 (Low Activity) ---
-        if (intensity < 0.3 && Math.random() < 0.05) triggerBird();
+        // --- 1. 鳥 (Low Activityのみ) ---
+        if (intensity < 0.3) {
+            if (Math.random() < 0.05) triggerBird();
+        }
 
-        // --- 2. コード (小節頭) ---
+        // --- 2. コード (常に) ---
         if (beat16 === 0) {
             chordSynth.triggerAttackRelease(currentChord.notes, "2n", time);
         }
 
-        // --- 3. ★変更点: キック & ドラム ---
-        // キック (Bass Drum) のロジック
-        // 常に小節の頭(beat16===0)は鳴らす
-        if (beat16 === 0) {
-            drumKit.kick.triggerAttackRelease("C1", "8n", time);
-        } 
-        // intensityが上がってきたら、4つ打ち (Beat 4, 8, 12 つまり beat4===0) にする
-        else if (intensity > 0.35 && beat4 === 0) {
-            drumKit.kick.triggerAttackRelease("C1", "8n", time);
-        }
-
-        // ベース (Bass)
+        // --- 3. ベース & ドラム（★ここを修正：キックのパターン変化） ---
+        
+        // ベースは元のまま
         if (beat16 === 0) {
              const root = currentChord.notes[0].replace("3","2").replace("4","3");
              bassSynth.triggerAttackRelease(root, "8n", time);
         }
-        // 走り出したら裏拍にベースを入れる
-        if (intensity > 0.5 && beat16 === 10) {
-            const root = currentChord.notes[0].replace("3","2").replace("4","3");
-            bassSynth.triggerAttackRelease(root, "8n", time);
+        
+        // ★キック（バスドラム）の制御
+        // 基本: 小節の頭(0)で鳴る
+        // 動き出した(intensity > 0.4): 4分音符(0, 4, 8, 12)で鳴る＝4つ打ち
+        const isQuarterNote = (beat16 % 4 === 0);
+        
+        if (beat16 === 0) {
+            // 頭拍は必ず鳴らす
+            drumKit.kick.triggerAttackRelease("C1", "8n", time);
+        } else if (intensity > 0.4 && isQuarterNote) {
+            // 動きがあれば残りの拍も鳴らす（ドン・ドン・ドン・ドン）
+            drumKit.kick.triggerAttackRelease("C1", "8n", time);
         }
 
-        // ハイハット (疾走感)
-        if (intensity > 0.5 && beat4 === 0) drumKit.hat.triggerAttackRelease("32n", time); // 4分
-        if (intensity > 0.8 && beat16 % 2 === 0) drumKit.hat.triggerAttackRelease("32n", time); // 8分
+        // ハイハットなどは元のロジック
+        if (intensity > 0.5) {
+            if (beat16 === 10) {
+                const root = currentChord.notes[0].replace("3","2").replace("4","3");
+                bassSynth.triggerAttackRelease(root, "8n", time);
+            }
+            if (beat16 % 4 === 0) drumKit.hat.triggerAttackRelease("32n", time);
+        }
+        
+        if (intensity > 0.8) {
+            drumKit.hat.triggerAttackRelease("32n", time);
+        }
 
-        // --- 4. メロディ ---
+        // --- 4. メロディ (元のまま) ---
         playMelody(time, intensity, beat16, barIndex);
 
         tick++;
@@ -208,21 +225,23 @@ function playMelody(time, act, beat, chordIdx) {
         return;
     }
     if (act > 0.6) {
-        const density = act > 0.8 ? 1 : 2;
+        const density = act > 0.8 ? 1 : 2; 
         if (tick % density === 0) {
             const arpNotes = arpeggioNotes[chordIdx];
-            leadSynth.triggerAttackRelease(arpNotes[tick % arpNotes.length], "16n", time);
+            const noteIndex = tick % arpNotes.length; 
+            leadSynth.triggerAttackRelease(arpNotes[noteIndex], "16n", time);
         }
     } else {
         if (beat % 2 === 0 && Math.random() < 0.5) {
             const notes = chords[chordIdx].notes;
-            leadSynth.triggerAttackRelease(notes[Math.floor(Math.random() * notes.length)], "8n", time);
+            const note = notes[Math.floor(Math.random() * notes.length)];
+            leadSynth.triggerAttackRelease(note, "8n", time);
         }
     }
 }
 
 // ==========================================
-// 6. 更新ループ (BPM可変 & 演出)
+// 6. 更新ループ (風 & 背景 & BPM)
 // ==========================================
 function update() {
     requestAnimationFrame(update);
@@ -231,21 +250,27 @@ function update() {
     smoothedActivity += ((motionBuffer.length ? motionBuffer[motionBuffer.length-1] : 0) - smoothedActivity) * 0.05;
     smoothedActivity = Math.max(0, Math.min(1, smoothedActivity));
 
-    // --- 風 (控えめ) ---
+    // --- 風制御 ---
     let windVol = Math.max(0, (smoothedActivity - 0.2) * 0.25); 
     windGain.gain.rampTo(windVol, 0.1);
-    windFilter.frequency.rampTo(200 + (smoothedActivity * 1000), 0.1);
 
-    // --- ★変更点: BPM制御 ---
-    // 80 (Walk) 〜 170 (Sprint) の間でスムーズに変化
-    const targetBpm = 80 + (smoothedActivity * 90); 
-    Tone.Transport.bpm.rampTo(targetBpm, 0.2);
+    const windFreq = 200 + (smoothedActivity * 1000);
+    windFilter.frequency.rampTo(windFreq, 0.1);
 
-    // --- UI更新 ---
+    // --- 背景色制御 ---
     const bg = document.getElementById('bg-layer');
     const statusText = document.getElementById('statusText');
-    document.getElementById('speedVal').innerText = Math.round(smoothedActivity * 100) + "%";
-    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
+    const speedVal = document.getElementById('speedVal');
+    const bpmVal = document.getElementById('bpmVal');
+
+    speedVal.innerText = Math.round(smoothedActivity * 100) + "%";
+    
+    // ★BPM制御（ここを修正：可変幅を大きく）
+    // 0% -> BPM 80
+    // 100% -> BPM 180
+    const targetBpm = 80 + (smoothedActivity * 100);
+    Tone.Transport.bpm.rampTo(targetBpm, 0.1);
+    bpmVal.innerText = Math.round(Tone.Transport.bpm.value);
 
     if (smoothedActivity < 0.3) {
         bg.style.background = "linear-gradient(to bottom, #87CEEB, #E0F7FA)";
