@@ -8,329 +8,307 @@
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background: #222; color: #fff; }
         #startBtn { padding: 15px 30px; font-size: 1.2rem; background: #00d2ff; border: none; border-radius: 50px; color: #000; cursor: pointer; margin-top: 20px; }
-        #status { margin-top: 30px; line-height: 1.8; }
         .data { font-weight: bold; font-size: 1.5rem; color: #00d2ff; }
-        .desc { font-size: 0.9rem; color: #ccc; margin-top: 5px; }
-        #debug { font-size: 0.8rem; color: #666; margin-top: 20px; }
+        #visualFeedback { margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <h1>Motion Music V2</h1>
-    <p>歩くと音楽が成長し、<br>走ると風が吹きます。</p>
-    <button id="startBtn">開始 (Tap to Start)</button>
-    
-    <div id="status">
-        <div>Motion Energy: <span id="actVal" class="data">0.00</span></div>
-        <div>Story Progress: <span id="progressVal" class="data">0%</span></div>
-        <div>BPM: <span id="bpmVal" class="data">100</span></div>
-        <div id="visualFeedback" class="desc">待機中...</div>
-    </div>
-    <div id="debug">Sensor: <span id="sensorState">待機中</span></div>
+<h1>Motion Music V2</h1>
+<p>歩くと音楽が成長し、<br>走ると風が吹きます。</p>
+
+<button id="startBtn">開始 (Tap to Start)</button>
+
+<div id="status">
+    <div>Motion Energy: <span id="actVal" class="data">0.00</span></div>
+    <div>Story Progress: <span id="progressVal" class="data">0%</span></div>
+    <div>BPM: <span id="bpmVal" class="data">100</span></div>
+    <div id="visualFeedback">待機中...</div>
+</div>
+
+<div id="debug" style="color:#aaa;margin-top:20px;">
+    Sensor: <span id="sensorState">待機中</span>
+</div>
 
 <script>
-// ==========================================
-// 1. 設定と変数
-// ==========================================
-const BUFFER_SIZE = 30; 
-const motionBuffer = []; 
-let targetActivity = 0.0; 
-let activity = 0.0;       // 現在の瞬発的な動き (0.0 - 1.0)
-let accumulatedEnergy = 0.0; // 【映画的】蓄積されたエネルギー (物語の進行度)
-let smoothedVariance = 0.0; 
-let prevNote = "C4";
+// ============================================================
+// 1. 変数
+// ============================================================
+const BUFFER_SIZE = 30;
+const motionBuffer = [];
+let targetActivity = 0;
+let activity = 0;
+let accumulatedEnergy = 0;
+let smoothedVariance = 0;
 
-// 状態フラグ
 let motionListenerAttached = false;
 let isWindPlaying = false;
 
-// ==========================================
-// 2. 音楽データ (スケール定義の補完)
-// ==========================================
+// ============================================================
+// 2. コード・スケール
+// ============================================================
 const chords = [
-  ["C3","E3","G3"], ["B2","D3","G3"], ["A2","C3","E3"], ["G2","B2","E3"],
-  ["F2","A2","C3"], ["E2","G2","C3"], ["F2","A2","C3"], ["G2","B2","D3"]
+  ["C3","E3","G3"],
+  ["B2","D3","G3"],
+  ["A2","C3","E3"],
+  ["G2","B2","E3"],
+  ["F2","A2","C3"],
+  ["E2","G2","C3"],
+  ["F2","A2","C3"],
+  ["G2","B2","D3"]
 ];
 
-// Cメジャーペンタトニック + 経過音で構成
+// ペンタ主体
 const scales = [
-    ["C4","D4","E4","G4","A4"], // C
-    ["G3","A3","B3","D4","E4"], // G/B
-    ["A3","C4","E4","G4","A4"], // Am
-    ["E3","G3","B3","D4","E4"], // Em/G
-    ["F3","G3","A3","C4","D4"], // F
-    ["C4","D4","E4","G4","A4"], // C/E
-    ["F3","G3","A3","C4","D4"], // F
-    ["G3","A3","B3","D4","F#4"] // G (最後だけちょっと変化)
+  ["C4","D4","E4","G4","A4"],
+  ["G3","A3","B3","D4","E4"],
+  ["A3","C4","E4","G4","A4"],
+  ["E3","G3","B3","D4","E4"],
+  ["F3","G3","A3","C4","D4"],
+  ["C4","D4","E4","G4","A4"],
+  ["F3","G3","A3","C4","D4"],
+  ["G3","A3","B3","D4","F#4"]
 ];
 
-// ==========================================
-// 3. シンセサイザー設定
-// ==========================================
-let chordSynth, melodySynth, bassSynth, kick, snare, hihat, windSynth, ambientSynth;
+// ============================================================
+// 3. シンセ定義
+// ============================================================
+let chordSynth, bassSynth, melodySynth;
+let kick, snare, hihat;
+let windSynth;
+let ambientPads;
+
+// エフェクト
 let reverb, delay;
 
-// 伴奏：鋭くない柔らかい音へ変更
 function setupSynths() {
-    // エフェクト
-    reverb = new Tone.Reverb({ decay: 6, wet: 0.5 }).toDestination();
-    delay = new Tone.FeedbackDelay("8n.", 0.25).connect(reverb);
 
-    // ====== ▼▼▼ 柔らかい伴奏（コード） ▼▼▼ ======
+    reverb = new Tone.Reverb({ decay: 6, wet: 0.55 }).toDestination();
+    delay  = new Tone.FeedbackDelay("8n", 0.3).connect(reverb);
+
+    // --- コード ---
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -10,
-        oscillator: { 
-            type: "sine"  // 鋭さゼロ・丸い
-        },
-        envelope: { 
-            attack: 1.2,   // ふわっと立ち上がる
-            decay: 1.5,
-            sustain: 0.9,
-            release: 3.0  // 滑らかに消える
-        }
+      volume: -10,
+      oscillator: { type: "sine" },
+      envelope: { attack: 1.2, decay: 1.5, sustain: 0.9, release: 3 }
     }).connect(reverb);
 
-
-    // ====== ▼▼▼ 柔らかいベース ▼▼▼ ======
+    // --- ベース ---
     bassSynth = new Tone.MonoSynth({
-        volume: -12,
-        oscillator: {
-            type: "sine"  // サブベース的な丸さ
-        },
-        filter: {
-            type: "lowpass",
-            frequency: 200,
-            Q: 1
-        },
-        envelope: {
-            attack: 0.1,   // パンチを抑える
-            decay: 0.5,
-            sustain: 0.6,
-            release: 1.2
-        }
+      volume: -12,
+      oscillator: { type: "sine" },
+      filter: { type: "lowpass", frequency: 200, Q: 1 },
+      envelope: { attack: 0.1, decay: 0.5, sustain: 0.6, release: 1.2 }
     }).connect(reverb);
 
-
-    // ▼ メロディ と 風・アンビエント・ドラムは元のまま ▼
+    // --- メロディ ---
     melodySynth = new Tone.AMSynth({
-        volume: 5,
-        harmonicity: 2,
-        oscillator: { type: "sine" },
-        envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 1 }
+      volume: -6,   // 聞こえるように調整
+      harmonicity: 2,
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.02, decay: 0.25, sustain: 0.5, release: 0.8 }
     }).connect(delay);
 
+    // --- ドラム ---
+    kick  = new Tone.MembraneSynth({ volume: -4 }).toDestination();
+    snare = new Tone.NoiseSynth({ volume: -15, envelope: { decay: 0.2 } }).connect(reverb);
+    hihat = new Tone.MetalSynth({ volume: -20, frequency: 200, envelope: { decay: 0.05 } }).toDestination();
+
+    // --- 風 ---
     windSynth = new Tone.NoiseSynth({
         volume: -20,
         noise: { type: "pink" },
         envelope: { attack: 1, decay: 0.5, sustain: 1, release: 2 }
     });
-    const windFilter = new Tone.AutoFilter({
-        frequency: 0.1,
-        baseFrequency: 400,
-        octaves: 4
-    }).toDestination().start();
-    windSynth.connect(windFilter);
+    windSynth.connect(new Tone.Filter(500, "highpass").toDestination());
 
-    ambientSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -12,
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.05, decay: 3, sustain: 0, release: 3 }
-    }).connect(reverb);
+    // --- アンビエント音群 ---
+    ambientPads = [
+        new Tone.FMSynth({
+            volume: -15,
+            harmonicity: 1.5,
+            modulationIndex: 2,
+            oscillator: { type: "sine" },
+            envelope: { attack: 0.6, decay: 2.5, sustain: 0.2, release: 3 }
+        }).connect(reverb),
 
-    kick = new Tone.MembraneSynth({ volume: -4 }).toDestination();
-    snare = new Tone.NoiseSynth({ volume: -15, envelope: { decay: 0.2 } }).connect(reverb);
-    hihat = new Tone.MetalSynth({ volume: -20, frequency: 200, envelope: { decay: 0.05 }, harmonicity: 5.1 }).toDestination();
+        new Tone.MetalSynth({
+            volume: -20,
+            frequency: 440,
+            harmonicity: 7,
+            modulationIndex: 20,
+            resonance: 300,
+            envelope: { attack: 0.01, decay: 2, release: 1 }
+        }).connect(reverb),
+
+        new Tone.NoiseSynth({
+            volume: -25,
+            noise: { type: "white" },
+            envelope: { attack: 0.02, decay: 1.5, sustain: 0, release: 1.5 }
+        }).connect(new Tone.AutoFilter({ frequency: 0.2, baseFrequency: 600, octaves: 3 }).toDestination().start())
+    ];
 }
 
-// ==========================================
-// 4. 音楽生成ロジック
-// ==========================================
+// ランダムアンビエント
+function playAmbientRandom() {
+    const choice = ambientPads[Math.floor(Math.random() * ambientPads.length)];
+    const notes = ["C5","E5","G5","B5"];
+    const n = notes[Math.floor(Math.random()*notes.length)];
+    choice.triggerAttackRelease(n, "2n");
+}
 
+// ============================================================
+// 4. 音楽ループ
+// ============================================================
 function startMusicLoop() {
     Tone.Transport.bpm.value = 100;
 
-    // --- A. コード進行 (基本レイヤー) ---
+    // --- A: コード ---
     Tone.Transport.scheduleRepeat((time) => {
         const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
+
         chordSynth.triggerAttackRelease(chords[bar], "1n", time);
-        
-        // 【映画的】Progressが低いときはここで終わる
-        // Progressが高いときだけベースを入れる
+
         if (accumulatedEnergy > 30) {
-            const root = chords[bar][0].replace("3","2").replace("2","1"); // オクターブ下
-            bassSynth.triggerAttackRelease(root, "2n", time);
+            const root = chords[bar][0];
+            const bass = Tone.Frequency(root).transpose(-12).toNote(); // -12 semitone
+            bassSynth.triggerAttackRelease(bass, "2n", time);
         }
     }, "1n");
 
-    // --- B. メロディ & アルペジオ ---
-    let tickCounter = 0;
+    // --- B: メロディ ---
+    let tick = 0;
     Tone.Transport.scheduleRepeat((time) => {
-        const currentBar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
-        
-        // Activityが高いほど細かく鳴らす
-        let division = (activity > 0.6) ? 2 : 4; 
-        
-        if (tickCounter % division === 0) {
-            // 【映画的】Progressが高いほど、鳴る確率が上がる（盛り上がり）
-            let probability = 0.3 + (accumulatedEnergy / 200); // 0.3 ~ 0.8
-            if (activity > 0.7) probability = 0.9; // 走ってるときはほぼ鳴る
+        const bar = Math.floor(Number(Tone.Transport.position.split(":")[0]) % 8);
+        let division = activity > 0.6 ? 2 : 4;
 
-            if (Math.random() < probability) {
-                // スケールからランダム、かつ直前の音に近いものを選ぶ
-                const candidate = scales[currentBar][Math.floor(Math.random() * scales[currentBar].length)];
-                melodySynth.triggerAttackRelease(candidate, "8n", time);
+        if (tick % division === 0) {
+            let prob = 0.3 + accumulatedEnergy / 200;
+            if (activity > 0.7) prob = 0.9;
+
+            if (Math.random() < prob) {
+                const scale = scales[bar];
+                const note = scale[Math.floor(Math.random()*scale.length)];
+                melodySynth.triggerAttackRelease(note, "8n", time);
             }
         }
-        tickCounter++;
+        tick++;
     }, "16n");
 
-    // --- C. ドラム (歩行リズム) ---
+    // --- C: ドラム ---
     Tone.Transport.scheduleRepeat((time) => {
-        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
-        
-        // シンプルな歩行リズム (4つ打ちベース)
-        if (s % 4 === 0) kick.triggerAttackRelease("C1", "8n", time);
-        
-        // Progressが進むとハイハットが入る
-        if (accumulatedEnergy > 50) {
-             if (s % 2 === 0) hihat.triggerAttackRelease("32n", time);
-        }
-        
-        // 激しいときはスネア
-        if (activity > 0.5 && s % 8 === 4) {
-            snare.triggerAttackRelease("8n", time);
-        }
+        const s = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ/4)) % 16;
+
+        if (s % 4 === 0) kick.triggerAttackRelease("C1","8n",time);
+        if (accumulatedEnergy > 50 && s % 2 === 0) hihat.triggerAttackRelease("32n",time);
+        if (activity > 0.5 && s % 8 === 4) snare.triggerAttackRelease("8n",time);
+
     }, "16n");
 
-    // --- D. 【偶発的】 アイドリング演出 ---
-    // 立ち止まっている時(Low Activity)にランダムに綺麗な音を鳴らす
+    // --- D: アイドリング演出 ---
     setInterval(() => {
-        if (activity < 0.2 && accumulatedEnergy < 90) { // 動きが少ない時
-            if (Math.random() < 0.3) { // 30%の確率
-                const note = ["C5","E5","G5","B5"][Math.floor(Math.random()*4)];
-                ambientSynth.triggerAttackRelease(note, "2n");
-            }
+        if (activity < 0.2 && accumulatedEnergy < 90) {
+            if (Math.random() < 0.3) playAmbientRandom();
         }
-    }, 2000); // 2秒ごとに判定
+    }, 2000);
 
     Tone.Transport.start();
 }
 
-// ==========================================
-// 5. センサー処理 & 演出制御
-// ==========================================
+// ============================================================
+// 5. センサー
+// ============================================================
 function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
     if (!a) return;
 
-    // 重力込みの加速度ベクトル
-    const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
     motionBuffer.push(mag);
     if (motionBuffer.length > BUFFER_SIZE) motionBuffer.shift();
 
     if (motionBuffer.length < 5) return;
 
-    // 標準偏差の簡易計算
     const mean = motionBuffer.reduce((a,b)=>a+b) / motionBuffer.length;
-    const variance = motionBuffer.reduce((a,b)=>a + Math.pow(b-mean, 2), 0) / motionBuffer.length;
+    const variance = motionBuffer.reduce((a,b)=>a + (b-mean)**2, 0)/motionBuffer.length;
     const stdDev = Math.sqrt(variance);
 
-    // 正規化 (歩行時は大体 1.0〜3.0、走行時は 5.0以上)
-    // ここで targetActivity を決定
     targetActivity = Math.min(stdDev / 5.0, 1.0);
-    
-    // BPM用
+
     smoothedVariance = smoothedVariance * 0.9 + stdDev * 0.1;
 }
 
+// ============================================================
+// 6. UI + 風 + BPM
+// ============================================================
 function updateLoop() {
-    // 値の平滑化
     activity += (targetActivity - activity) * 0.1;
 
-    // --- 映画的演出の更新 ---
-    // 動いているとエネルギーが溜まる（最大100）
-    if (activity > 0.3) {
-        accumulatedEnergy += 0.05; 
-    } else {
-        // 止まると少しずつ冷める
-        accumulatedEnergy -= 0.02; 
-    }
+    if (activity > 0.3) accumulatedEnergy += 0.05;
+    else accumulatedEnergy -= 0.02;
     accumulatedEnergy = Math.max(0, Math.min(100, accumulatedEnergy));
 
-    // --- 遊び的演出（風のエフェクト） ---
-    // 激しく動いたときだけ風が吹く
+    // 風
     if (activity > 0.6) {
         if (!isWindPlaying) {
-            windSynth.triggerAttack(Tone.now());
+            windSynth.triggerAttack();
             isWindPlaying = true;
         }
-        // 風の音量を動きに連動させる
-        windSynth.volume.rampTo(Tone.gainToDb(activity * 0.5), 0.1);
-    } else {
-        if (isWindPlaying) {
-            windSynth.triggerRelease();
-            isWindPlaying = false;
-        }
+        windSynth.volume.rampTo(-20 + activity * 20, 0.1);
+    } else if (isWindPlaying) {
+        windSynth.triggerRelease();
+        isWindPlaying = false;
     }
 
-    // --- BPM同期 (歩行感) ---
-    // 90〜130の間で揺らす
-    let targetBpm = 100 + (smoothedVariance * 8); 
+    // BPM 90〜140
+    let targetBpm = 100 + smoothedVariance * 8;
     targetBpm = Math.max(90, Math.min(140, targetBpm));
     Tone.Transport.bpm.rampTo(targetBpm, 0.5);
 
-    // --- 画面表示更新 ---
-    document.getElementById('actVal').innerText = activity.toFixed(2);
-    document.getElementById('progressVal').innerText = Math.floor(accumulatedEnergy) + "%";
-    document.getElementById('bpmVal').innerText = Math.round(Tone.Transport.bpm.value);
-    
-    // フィードバックテキスト
-    const fb = document.getElementById('visualFeedback');
-    if (activity < 0.2) fb.innerText = "休憩中... (偶発的アンビエント)";
-    else if (activity < 0.6) fb.innerText = "歩行中 (物語の進行)";
-    else fb.innerText = "走行中！ (風のエフェクト)";
+    // 画面表示
+    document.getElementById("actVal").textContent = activity.toFixed(2);
+    document.getElementById("progressVal").textContent = Math.floor(accumulatedEnergy);
+    document.getElementById("bpmVal").textContent = Math.round(Tone.Transport.bpm.value);
+
+    const fb = document.getElementById("visualFeedback");
+    if (activity < 0.2) fb.textContent = "休憩中...（偶発的アンビエント）";
+    else if (activity < 0.6) fb.textContent = "歩行中（物語の進行）";
+    else fb.textContent = "走行中！風が吹いている";
 
     requestAnimationFrame(updateLoop);
 }
 
-// ==========================================
-// 6. 初期化
-// ==========================================
-const btn = document.getElementById('startBtn');
-const sensorState = document.getElementById('sensorState');
+// ============================================================
+// 7. 開始ボタン
+// ============================================================
+document.getElementById("startBtn").addEventListener("click", async () => {
 
-btn.addEventListener('click', async () => {
-    if (typeof DeviceMotionEvent.requestPermission === 'function') {
-        try {
-            const permissionState = await DeviceMotionEvent.requestPermission();
-            if (permissionState === 'granted') {
-                window.addEventListener('devicemotion', handleMotion);
-                motionListenerAttached = true;
-                sensorState.innerText = "センサー取得中(iOS)";
-            } else {
-                alert("許可されませんでした");
-                return;
-            }
-        } catch (e) {
-            alert("エラー: " + e);
+    // iOS
+    if (typeof DeviceMotionEvent.requestPermission === "function") {
+        const res = await DeviceMotionEvent.requestPermission();
+        if (res === "granted") {
+            window.addEventListener("devicemotion", handleMotion);
+            motionListenerAttached = true;
+            document.getElementById("sensorState").textContent = "センサー取得中（iOS）";
+        } else {
+            alert("センサーが許可されませんでした");
             return;
         }
     } else {
-        window.addEventListener('devicemotion', handleMotion);
+        window.addEventListener("devicemotion", handleMotion);
         motionListenerAttached = true;
-        sensorState.innerText = "センサー取得中(Android/PC)";
+        document.getElementById("sensorState").textContent = "センサー取得中（Android/PC）";
     }
 
     await Tone.start();
     setupSynths();
 
-    if (motionListenerAttached) {
-        btn.innerText = "演奏中...";
-        btn.disabled = true;
-        startMusicLoop();
-        updateLoop();
-    }
+    document.getElementById("startBtn").disabled = true;
+    document.getElementById("startBtn").textContent = "演奏中...";
+
+    startMusicLoop();
+    updateLoop();
 });
+
 </script>
 </body>
 </html>
