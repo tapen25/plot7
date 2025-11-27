@@ -118,17 +118,16 @@ function setupSynths() {
     // --- 1. Chords (Strings) ---
     // 柔らかいストリングス
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -10,
+        volume: -14,
         oscillator: {
-            type: "fatsawtooth", // 厚みのある音
-            count: 3,
-            spread: 20
+        type: "triangle8", // ★三角波＋やわらかい倍音 → 優しくなる
+        partials: [1,0.4,0.2,0.1], // ★倍音を滑らかに減衰
         },
         envelope: {
-            attack: 0.8, // ふわっと入る
-            decay: 0.2,
-            sustain: 0.8,
-            release: 2.5
+        attack: 1.6,  // ★ゆっくりふわっと入る
+        decay: 0.4,
+        sustain: 0.7, // しっかり伸びるけど主張しない
+        release: 3.5  // ★余韻長めでやさしい
         }
     }).connect(chorus);
 
@@ -173,17 +172,23 @@ function setupSynths() {
     shaker = new Tone.NoiseSynth({ volume: -24, envelope: { decay: 0.1 } }).connect(reverb);
 
     // --- 5. Wind (Soft Breeze) ★変更点 ---
-    windFilter = new Tone.Filter({ 
-        type: "lowpass", // ハイパスではなくローパスで柔らかく制御（あるいはバンドパス）
-        frequency: 400, 
-        Q: 1 
-    }).toDestination();
-    
-    windSynth = new Tone.NoiseSynth({
-        volume: -100,
-        noise: { type: "pink" }, // ★ピンクノイズ（高音が少なく柔らかい）
-        envelope: { attack: 1, decay: 0.5, sustain: 1, release: 2 }
-    }).connect(windFilter);
+    windFilter = new Tone.Filter({
+    type: "bandpass",  // ★帯域だけ通す（爽やかさUP）
+    frequency: 3000,   // 中心周波数
+    Q: 0.6             // 幅広めにして自然に
+}).connect(reverb);
+
+windSynth = new Tone.NoiseSynth({
+    volume: -18, // ★以前より大きくして「風っぽさ」を得る
+    noise: { type: "white" }, // ★ホワイトノイズで「ヒュー感」
+    envelope: {
+        attack: 0.005, // ★超高速アタック → 風を切る感じ
+        decay: 0.25,  // ★減衰短め → 風切りの爽快感
+        sustain: 0.0, // 維持しない
+        release: 0.1  // 残さない
+    }
+});
+windSynth.connect(windFilter);
 }
 
 // ============================================================
@@ -264,6 +269,14 @@ function handleMotion(event) {
     let rawActivity = Math.min(stdDev / 4.0, 1.0);
     instantMotion = rawActivity;
     smoothedMotion = smoothedMotion * 0.9 + instantMotion * 0.1;
+
+    // 風切りヒューを振ったときに発生させる
+    if (instantMotion > 0.15) { // ★しっかり振ったときに発動
+        const hueFreq = 1200 + Math.random()*3000; // 1.2kHz 〜 4.2kHz くらいにランダム
+        windFilter.frequency.setValueAtTime(hueFreq, Tone.now());
+        windSynth.triggerAttackRelease("8n"); // ★振るたびに「ヒュー」
+    }
+
 }
 
 // ============================================================
