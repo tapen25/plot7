@@ -3,65 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Motion Music V4 - Story & Speed</title>
+    <title>Motion Music V5 - Strings Edition</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <style>
         body { 
             font-family: 'Helvetica Neue', Arial, sans-serif; 
             text-align: center; 
             padding: 20px; 
-            background: linear-gradient(160deg, #e0c3fc 0%, #8ec5fc 100%); 
-            color: #444; 
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+            color: #fff; 
             height: 100vh; 
             overflow: hidden; 
             user-select: none;
         }
-        h1 { font-weight: 200; letter-spacing: 0.1em; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        p { color: #fff; font-size: 1rem; opacity: 0.9; }
+        h1 { font-weight: 200; letter-spacing: 0.1em; text-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        p { font-size: 1rem; opacity: 0.9; }
         
         #startBtn { 
             padding: 20px 50px; font-size: 1.2rem; 
-            background: rgba(255,255,255,0.9); border: none; 
-            border-radius: 50px; color: #555; cursor: pointer; 
-            margin-top: 30px; box-shadow: 0 8px 20px rgba(0,0,0,0.15); 
-            transition: transform 0.1s, background 0.3s;
+            background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); 
+            border-radius: 50px; color: #fff; cursor: pointer; 
+            margin-top: 30px; backdrop-filter: blur(5px);
+            transition: background 0.3s;
         }
-        #startBtn:active { transform: scale(0.95); }
+        #startBtn:hover { background: rgba(255,255,255,0.4); }
 
         #status { 
             margin-top: 40px; 
-            background: rgba(255,255,255,0.85); 
+            background: rgba(0,0,0,0.2); 
             padding: 25px; 
             border-radius: 20px; 
             display: inline-block; 
             min-width: 280px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-            backdrop-filter: blur(5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
         }
-        .data { font-weight: bold; font-size: 1.8rem; color: #6a85b6; }
-        .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .data { font-weight: bold; font-size: 1.8rem; }
+        .label { font-size: 0.8rem; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; }
         
         #mode-display {
-            margin-top: 15px; font-size: 1.2rem; font-weight: bold; color: #555;
-            padding: 5px 15px; border-radius: 10px; background: #fff; display: inline-block;
+            margin-top: 15px; font-size: 1.2rem; font-weight: bold;
+            padding: 5px 15px; border-radius: 10px; background: rgba(255,255,255,0.2); display: inline-block;
         }
 
         #wind-indicator {
-            height: 6px; background: #eee; width: 220px; margin: 15px auto 5px; border-radius: 3px; overflow: hidden;
+            height: 6px; background: rgba(255,255,255,0.3); width: 220px; margin: 15px auto 5px; border-radius: 3px; overflow: hidden;
         }
         #wind-bar {
-            height: 100%; width: 0%; background: linear-gradient(90deg, #a18cd1 0%, #fbc2eb 100%); transition: width 0.05s;
+            height: 100%; width: 0%; background: #fff; transition: width 0.05s;
         }
-
-        #debug { color: rgba(255,255,255,0.6); font-size: 0.7rem; margin-top: 30px; }
     </style>
 </head>
 <body>
 
-<h1>Motion Music V4</h1>
-<p>Walk to build the story.<br>Run to raise the tempo.</p>
+<h1>Motion Music V5</h1>
+<p>Strings Strings & Story</p>
 
-<button id="startBtn">START EXPERIENCE</button>
+<button id="startBtn">TAP TO START</button>
 
 <div id="status">
     <div class="label">BPM (Speed)</div>
@@ -70,11 +68,9 @@
     <div style="margin-top:20px;" class="label">Wind Intensity</div>
     <div id="wind-indicator"><div id="wind-bar"></div></div>
 
-    <div style="margin-top:20px;" class="label">Current Story</div>
-    <div id="mode-display">Calm (日常)</div>
+    <div style="margin-top:20px;" class="label">Story Mode</div>
+    <div id="mode-display">Calm Strings</div>
 </div>
-
-<div id="debug">Sensor: <span id="sensorState">Waiting...</span></div>
 
 <script>
 // ============================================================
@@ -82,19 +78,14 @@
 // ============================================================
 const BUFFER_SIZE = 20;
 const motionBuffer = [];
-
-// 動きの指標
-let instantMotion = 0;  // 瞬発値（風の強さ）
-let smoothedMotion = 0; // 平均値（BPM・コード進行の判定）
-
+let instantMotion = 0; 
+let smoothedMotion = 0; 
 let isPlaying = false;
 
 // ============================================================
 // 2. コード進行定義 (ストーリー分岐)
 // ============================================================
-
-// A: 循環コード（日常・安定・Calm）
-// C Maj7 -> Am7 -> F Maj7 -> G7
+// ストリングスに合わせて音域を少し調整
 const chordsCalm = [
   ["C4","E4","G4","B4"], 
   ["A3","C4","E4","G4"], 
@@ -102,13 +93,11 @@ const chordsCalm = [
   ["G3","B3","D4","F4"]
 ];
 
-// B: 上昇進行（非日常・高揚・Active）
-// Dm7 -> Em7 -> FMaj7 -> G7sus4 (Rising Story)
 const chordsActive = [
-  ["D4","F4","A4","C5"], // Dm7
-  ["E4","G4","B4","D5"], // Em7
-  ["F4","A4","C5","E5"], // FMaj7
-  ["G4","C5","D5","F5"]  // G7sus4 (浮遊感のあるドミナント)
+  ["D4","F4","A4","C5"], 
+  ["E4","G4","B4","D5"], 
+  ["F4","A4","C5","E5"], 
+  ["G4","C5","D5","F5"] 
 ];
 
 // ============================================================
@@ -120,83 +109,85 @@ let windSynth, windFilter;
 let chorus, reverb, delay;
 
 function setupSynths() {
-    // --- Master Effects ---
-    reverb = new Tone.Reverb({ decay: 4, wet: 0.3 }).toDestination();
-    chorus = new Tone.Chorus(2, 2.5, 0.3).connect(reverb).start();
+    // --- エフェクト (ストリングス用に広がりを強化) ---
+    reverb = new Tone.Reverb({ decay: 6, wet: 0.5 }).toDestination(); // 深めのリバーブ
+    chorus = new Tone.Chorus(2.5, 4.0, 0.6).connect(reverb).start(); // 厚みを出すコーラス
     delay  = new Tone.FeedbackDelay("8n.", 0.2).connect(reverb);
 
-    // --- 1. Chords (E.Piano) ---
-    chordSynth = new Tone.PolySynth(Tone.FMSynth, {
-        volume: -10,
-        harmonicity: 3,
-        modulationIndex: 0.5,
-        oscillator: { type: "sine" },
-        envelope: { attack: 0.02, decay: 0.5, sustain: 0.7, release: 1.5 }
-    }).connect(chorus);
+    // --- 1. Chords (Strings Section) ★ここを変更 ---
+    // fatsawtooth: 複数のノコギリ波を重ねてデチューンした音（ストリングスの定番）
+    chordSynth = new Tone.PolySynth(Tone.Synth, {
+        volume: -12,
+        oscillator: {
+            type: "fatsawtooth",
+            count: 3,
+            spread: 30
+        },
+        envelope: {
+            attack: 0.6,  // ゆっくり立ち上がる（ボウイングの表現）
+            decay: 0.1,
+            sustain: 1.0, // 鍵盤を押している間は音が減衰しない
+            release: 2.0  // 指を離した後も長く響く
+        }
+    }).connect(chorus); // コーラスに通してさらに広げる
 
-    // --- 2. Melody (Glass/Pluck) ---
+    // --- 2. Melody (Harp/Pluck style) ---
     melodySynth = new Tone.PolySynth(Tone.Synth, {
         volume: -8,
         oscillator: { type: "triangle" },
-        envelope: { attack: 0.01, decay: 0.3, sustain: 0.1, release: 1.2 }
+        envelope: { attack: 0.01, decay: 0.4, sustain: 0.1, release: 1.5 }
     }).connect(delay);
 
-    // --- 3. Bass ---
+    // --- 3. Bass (Cello/Contrabass style) ---
     bassSynth = new Tone.MonoSynth({
-        volume: -8,
-        oscillator: { type: "square" },
-        filter: { type: "lowpass", frequency: 400 },
-        envelope: { attack: 0.05, decay: 0.2, sustain: 0.8, release: 0.5 }
+        volume: -6,
+        oscillator: { type: "sawtooth" },
+        filter: { type: "lowpass", frequency: 300 }, // 高域を削って低音弦っぽく
+        envelope: { attack: 0.3, decay: 0.3, sustain: 0.8, release: 1.5 }
     }).connect(reverb);
 
     // --- 4. Drums ---
-    kick = new Tone.MembraneSynth({ volume: -4 }).toDestination();
-    shaker = new Tone.NoiseSynth({ volume: -20, envelope: { decay: 0.1 } }).connect(reverb);
+    kick = new Tone.MembraneSynth({ volume: -6 }).toDestination();
+    shaker = new Tone.NoiseSynth({ volume: -22, envelope: { decay: 0.1 } }).connect(reverb);
 
-    // --- 5. Wind (Filter Sweep) ---
+    // --- 5. Wind ---
     windFilter = new Tone.Filter({ type: "highpass", frequency: 500, Q: 0.5 }).toDestination();
     windSynth = new Tone.NoiseSynth({
         volume: -100,
-        noise: { type: "white" }, // 爽やかな風
+        noise: { type: "white" },
         envelope: { attack: 0.5, decay: 0.1, sustain: 1, release: 0.5 }
     }).connect(windFilter);
 }
 
 // ============================================================
-// 4. ミュージックループ (ストーリーロジック実装)
+// 4. ミュージックループ
 // ============================================================
 function startMusicLoop() {
     Tone.Transport.bpm.value = 100;
-    windSynth.triggerAttack(); // 風は常時ON、Volumeで制御
+    windSynth.triggerAttack(); 
 
-    // --- ループ定義 ---
+    // --- コード演奏 ---
     Tone.Transport.scheduleRepeat((time) => {
-        // 現在の小節 (0~3)
         const bar = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ * 4)) % 4;
         
-        // ★ストーリー分岐ロジック★
-        // smoothedMotionが0.6を超えたら「Activeモード」へ
+        // ストーリー分岐
         const isHighEnergy = smoothedMotion > 0.6;
         const currentProgression = isHighEnergy ? chordsActive : chordsCalm;
         
-        // コード演奏
         const chord = currentProgression[bar];
         chordSynth.releaseAll();
         chordSynth.triggerAttackRelease(chord, "1n", time);
 
-        // ベース演奏 (ルート音)
+        // ベース
         const root = chord[0];
-        bassSynth.triggerAttackRelease(Tone.Frequency(root).transpose(-12), "2n", time);
+        // Bassをオクターブ下で
+        bassSynth.triggerAttackRelease(Tone.Frequency(root).transpose(-12), "1n", time);
 
-        // UI更新用にクラスを付与などしたいが、描画ループ側で処理
+    }, "1n");
 
-    }, "1n"); // 1小節ごとに更新
-
-    // --- メロディ (ランダムアルペジオ) ---
+    // --- メロディ ---
     Tone.Transport.scheduleRepeat((time) => {
         if (Math.random() < 0.4 + (smoothedMotion * 0.4)) {
-            // 現在鳴っているコードの構成音からランダムに選ぶ
-            // ※簡易的にCメジャースケール音から選択して響きを濁らせない
             const notes = ["C5","D5","E5","G5","A5","B5"];
             const note = notes[Math.floor(Math.random() * notes.length)];
             melodySynth.triggerAttackRelease(note, "16n", time);
@@ -206,19 +197,14 @@ function startMusicLoop() {
     // --- リズム ---
     Tone.Transport.scheduleRepeat((time) => {
         const beat = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
-        
-        // Kick: 4つ打ち
         if (beat % 4 === 0) kick.triggerAttackRelease("C2", "8n", time);
         
-        // Shaker: 動きに合わせて密度変化
         if (smoothedMotion > 0.3) {
             if (beat % 2 === 0) shaker.triggerAttackRelease("32n", time);
         }
-        if (smoothedMotion > 0.7) {
-            // 走っている時は裏拍も鳴らす
-            if (beat % 2 !== 0) shaker.triggerAttackRelease("32n", time, 0.5); 
+        if (smoothedMotion > 0.7 && beat % 2 !== 0) {
+            shaker.triggerAttackRelease("32n", time, 0.5); 
         }
-
     }, "16n");
 
     Tone.Transport.start();
@@ -231,7 +217,6 @@ function handleMotion(event) {
     const a = event.accelerationIncludingGravity;
     if (!a) return;
 
-    // 重力の影響を簡易除去し、動きの大きさだけ取る
     const x = a.x || 0;
     const y = a.y || 0;
     const z = a.z || 0;
@@ -242,60 +227,48 @@ function handleMotion(event) {
 
     if (motionBuffer.length < 5) return;
 
-    // 分散（揺れの激しさ）を計算
     const mean = motionBuffer.reduce((s,v)=>s+v,0) / motionBuffer.length;
     const variance = motionBuffer.reduce((s,v)=>s+(v-mean)**2,0) / motionBuffer.length;
     const stdDev = Math.sqrt(variance);
 
-    // 正規化 (0.0 〜 1.0 程度に収める調整)
     let rawActivity = Math.min(stdDev / 4.0, 1.0);
-
-    // instantMotion: 風用（反応速く）
     instantMotion = rawActivity;
-
-    // smoothedMotion: 音楽展開用（ゆっくり追従）
     smoothedMotion = smoothedMotion * 0.9 + instantMotion * 0.1;
 }
 
 // ============================================================
-// 6. 描画ループ & パラメータ適用
+// 6. 描画ループ
 // ============================================================
 function updateLoop() {
     if (!isPlaying) return;
 
-    // ★BPMマッピング: Activity 0~1.0 => 100~150 BPM
+    // BPM: 100 ~ 150
     const minBpm = 100;
     const maxBpm = 150;
     let targetBpm = minBpm + (smoothedMotion * (maxBpm - minBpm));
-    
-    // 急激な変化を防ぐランプ処理
     Tone.Transport.bpm.rampTo(targetBpm, 0.2);
 
-    // ★風の音量制御 (前バージョン同様)
+    // Wind Volume
     let windVol = -60 + (instantMotion * 50);
     if (instantMotion < 0.05) windVol = -100;
     windSynth.volume.rampTo(windVol, 0.1);
     
-    // 風のフィルター開閉
+    // Wind Filter
     let windFreq = 500 + (instantMotion * 4000);
     windFilter.frequency.rampTo(windFreq, 0.1);
 
-    // --- UI更新 ---
+    // UI
     document.getElementById("bpmVal").textContent = Math.round(Tone.Transport.bpm.value);
     
-    // ストーリー表示
     const modeDiv = document.getElementById("mode-display");
     if (smoothedMotion > 0.6) {
-        modeDiv.textContent = "High Energy (上昇・高揚)";
-        modeDiv.style.color = "#ff6b6b";
-        modeDiv.style.background = "#fff0f0";
+        modeDiv.textContent = "Dramatic (Active)";
+        modeDiv.style.color = "#ffdddd";
     } else {
-        modeDiv.textContent = "Calm (日常・循環)";
-        modeDiv.style.color = "#555";
-        modeDiv.style.background = "#fff";
+        modeDiv.textContent = "Calm Strings";
+        modeDiv.style.color = "#fff";
     }
 
-    // 風メーター
     const wPercent = Math.min(100, instantMotion * 100);
     document.getElementById("wind-bar").style.width = wPercent + "%";
 
@@ -307,20 +280,16 @@ function updateLoop() {
 // ============================================================
 document.getElementById("startBtn").addEventListener("click", async () => {
     if (isPlaying) return;
-
-    // iOS許可
     if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
         try {
             const res = await DeviceMotionEvent.requestPermission();
             if (res !== "granted") {
-                alert("センサーが許可されませんでした");
+                alert("センサー不可");
                 return;
             }
         } catch (e) { console.error(e); }
     }
-
     window.addEventListener("devicemotion", handleMotion);
-    document.getElementById("sensorState").textContent = "Active";
 
     await Tone.start();
     setupSynths();
