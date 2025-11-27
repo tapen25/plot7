@@ -70,27 +70,48 @@ const scales = [
 let chordSynth, melodySynth, bassSynth, kick, snare, hihat, windSynth, ambientSynth;
 let reverb, delay;
 
+// 伴奏：鋭くない柔らかい音へ変更
 function setupSynths() {
     // エフェクト
-    reverb = new Tone.Reverb({ decay: 4, wet: 0.4 }).toDestination();
-    delay = new Tone.FeedbackDelay("8n.", 0.3).connect(reverb);
+    reverb = new Tone.Reverb({ decay: 6, wet: 0.5 }).toDestination();
+    delay = new Tone.FeedbackDelay("8n.", 0.25).connect(reverb);
 
-    // 【映画的】 パッド (コード用) - 優しい音
+    // ====== ▼▼▼ 柔らかい伴奏（コード） ▼▼▼ ======
     chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -12,
-        oscillator: { type: "fatsawtooth", count: 3, spread: 30 },
-        envelope: { attack: 0.5, decay: 1, sustain: 1, release: 2 }
+        volume: -10,
+        oscillator: { 
+            type: "sine"  // 鋭さゼロ・丸い
+        },
+        envelope: { 
+            attack: 1.2,   // ふわっと立ち上がる
+            decay: 1.5,
+            sustain: 0.9,
+            release: 3.0  // 滑らかに消える
+        }
     }).connect(reverb);
 
-    // 【映画的】 ベース - 物語が進むと入ってくる
-    bassSynth = new Tone.MonoSynth({
-        volume: -8,
-        oscillator: { type: "square" },
-        filter: { Q: 2, type: "lowpass", rollover: -12 },
-        envelope: { attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.5 }
-    }).toDestination();
 
-    // メロディ - はっきりした音
+    // ====== ▼▼▼ 柔らかいベース ▼▼▼ ======
+    bassSynth = new Tone.MonoSynth({
+        volume: -12,
+        oscillator: {
+            type: "sine"  // サブベース的な丸さ
+        },
+        filter: {
+            type: "lowpass",
+            frequency: 200,
+            Q: 1
+        },
+        envelope: {
+            attack: 0.1,   // パンチを抑える
+            decay: 0.5,
+            sustain: 0.6,
+            release: 1.2
+        }
+    }).connect(reverb);
+
+
+    // ▼ メロディ と 風・アンビエント・ドラムは元のまま ▼
     melodySynth = new Tone.AMSynth({
         volume: -6,
         harmonicity: 2,
@@ -98,28 +119,24 @@ function setupSynths() {
         envelope: { attack: 0.01, decay: 0.2, sustain: 0.5, release: 1 }
     }).connect(delay);
 
-    // 【遊び的】 風の音 (Noise) - 走ると鳴る
     windSynth = new Tone.NoiseSynth({
         volume: -20,
         noise: { type: "pink" },
         envelope: { attack: 1, decay: 0.5, sustain: 1, release: 2 }
     });
-    // 風用のフィルタ (動的に動かす)
     const windFilter = new Tone.AutoFilter({
-        frequency: 0.1, 
-        baseFrequency: 400, 
-        octaves: 4 
+        frequency: 0.1,
+        baseFrequency: 400,
+        octaves: 4
     }).toDestination().start();
     windSynth.connect(windFilter);
 
-    // 【偶発的】 アンビエント (きらめき) - 止まると鳴る
     ambientSynth = new Tone.PolySynth(Tone.Synth, {
         volume: -12,
         oscillator: { type: "triangle" },
         envelope: { attack: 0.05, decay: 3, sustain: 0, release: 3 }
     }).connect(reverb);
 
-    // ドラム
     kick = new Tone.MembraneSynth({ volume: -4 }).toDestination();
     snare = new Tone.NoiseSynth({ volume: -15, envelope: { decay: 0.2 } }).connect(reverb);
     hihat = new Tone.MetalSynth({ volume: -20, frequency: 200, envelope: { decay: 0.05 }, harmonicity: 5.1 }).toDestination();
