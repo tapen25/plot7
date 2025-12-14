@@ -2,315 +2,106 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>Tone.js 再生・停止</title>
-  <script src="https://unpkg.com/tone@latest/build/Tone.js"></script>
+  <title>Tone.js One Shot Demo</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding-top: 50px;
+      background: #f5f5f5;
+    }
+    button {
+      font-size: 18px;
+      padding: 15px 30px;
+      margin: 10px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
-  <h2>再生・停止</h2>
-  <button id="startBtn">▶ スタート</button>
-  <button id="stopBtn">■ ストップ</button>
+
+  <h1>Tone.js ワンショット音デモ</h1>
+  <p>ボタンを押すと1音鳴ります</p>
+
+  <button id="popBtn">Pop</button>
+  <button id="drumBtn">Drum</button>
+  <button id="bassBtn">Bass</button>
 
   <script>
-    let count = 0;
-    let chord_count=0;
-    
-    // シンセ用意
-    const limiter = new Tone.Limiter(-6).toDestination();
-    const compressor = new Tone.Compressor({
-  threshold: -12, // dB 単位のしきい値。入力レベルがこの値を超えると圧縮開始
-  ratio: 10,       // 圧縮比（例:4 ＝ 4:1）。入力がしきい値を 4dB 超過すると、出力は 1dB 超過の扱いに
-  attack: 0.003,  // アタックタイム（秒）。しきい値超過後に圧縮がかかり始めるまでの時間
-  release: 0.250, // リリースタイム（秒）。圧縮をかけた後、元のゲインに戻るまでの時間
-  knee: 30        // ニー（dB）。この範囲内で徐々に圧縮がかかる。0 ならハードニー。
-}).connect(limiter);
+    let started = false;
 
-// 1) Reverb を生成し、wet を 0.5 に初期設定
-const reverb = new Tone.Reverb({
-     decay: 1.5,      // 残響（リバーブ）時間（秒）
-     preDelay: 0.1,  // 初期遅延（秒）
-     wet: 0.2  // 初期値としてドライ&ウェット 50:50
-    }).connect(compressor);
-    
-const fbDelay = new Tone.FeedbackDelay({
-  delayTime: "8n", // 遅延時間（四分音符 1 拍）
-  feedback: 0.1,   // フィードバック比率（0～1）
-  wet: 0.0         // ドライ/ウェット比（0.0～1.0）
-}).connect(reverb);
+    // ===== 音色定義 =====
 
-const master_bus = new Tone.Channel().connect(fbDelay);
-    
-const sample = new Tone.Players({
-  kick: "dance_kick_2.wav",
-  snare: "clap snare.wav",
-  hh: "closed_hihat_808.wav"
-
-}).connect(compressor);
-sample.autostart = false; // 自動再生はしない
-
-// PolySynth を作成し、★MonoSynth のパラメータをオブジェクトで指定★
-    
-const synth = new Tone.PolySynth(Tone.MonoSynth, {
-  // ── MonoSynth のオシレーター設定 ──
-  maxPolyphony:12,
-  oscillator: {
-    type: "sawtooth",   // 'sine' / 'square' / 'triangle' / 'sawtooth' など
-  },
-  // ── MonoSynth のフィルター設定（必要に応じて） ──
-  filter: {
-    type: "lowpass",
-    Q: 0.1,
-    rolloff: -12
-  },
-  // ── MonoSynth のエンベロープ（音量エンベロープ） ──
-  envelope: {
-    attack: 0.02,
-    decay: 0.1,
-    sustain: 0.7,
-    release: 0.05
-  },
-  // ── フィルターエンベロープ（必要な場合） ──
-  filterEnvelope: {
-    attack: 0.01,
-    decay: 0.1,
-    sustain: 0.8,
-    release: 0.1,
-    baseFrequency: 7000,
-    octaves: 2
-  }
-}).connect(master_bus);
-
-const synth2 = new Tone.PolySynth(Tone.MonoSynth, {
-  // ── MonoSynth のオシレーター設定 ──
-  maxPolyphony:12,
-  oscillator: {
-    type: "sawtooth",   // 'sine' / 'square' / 'triangle' / 'sawtooth' など
-  },
-  // ── MonoSynth のエンベロープ（音量エンベロープ） ──
-  envelope: {
-    attack: 0.02,
-    decay: 0.05,
-    sustain: 0.7,
-    release: 0.05
-  }
-}).connect(master_bus);
-
-   
-const synth3 = new Tone.PolySynth(Tone.MonoSynth, {
-  // ── MonoSynth のオシレーター設定 ──
-  maxPolyphony:12,
-  oscillator: {
-    type: "sawtooth",   // 'sine' / 'square' / 'triangle' / 'sawtooth' など
-  },
-  // ── MonoSynth のフィルター設定（必要に応じて） ──
-  filter: {
-    type: "lowpass",
-    Q: 0.1,
-    rolloff: -12
-  },
-  // ── MonoSynth のエンベロープ（音量エンベロープ） ──
-  envelope: {
-    attack: 0.02,
-    decay: 0.05,
-    sustain: 0.7,
-    release: 0.05
-  },
-  // ── フィルターエンベロープ（必要な場合） ──
-  filterEnvelope: {
-    attack: 0.01,
-    decay: 0.1,
-    sustain: 0.8,
-    release: 0.1,
-    baseFrequency: 7000,
-    octaves: 2
-  },
-  detune:-10
-}).connect(master_bus);
-
-
-
-    
-    // ループ：四分音符ごとに音を鳴らす
-    const loop = new Tone.Loop((time) => {
-     // console.log("count:", count);
-
-      const chords2 = [
-  ["F2","F3", "A3", "C4", "E4"],
-  ["F2","F3", "A3", "C4", "E4"],
-  ["F2","F3", "A3", "C4", "E4"],
-  ["F2","F3", "A3", "C4", "E4"],
-        
-  ["C2", "C3", "E3", "G3", "D4"],
-  ["C2", "C3", "E3", "G3", "D4"],
-  ["C2", "C3", "E3", "G3", "D4"],
-  ["C2", "C3", "E3", "G3", "D4"],
-        
-  ["G2", "G3", "B3", "D4"],
-  ["G2", "G3", "B3", "D4"],
-  ["G#2","G#3","B3", "D4"],        
-  ["G#2","G#3","B3", "D4"],
-        
-  ["A2", "G3", "C4", "E4"],      
-  ["A2", "G3", "C4", "E4"],
-  ["A2", "G3", "C4", "E4"],      
-  ["A2", "G3", "C4", "E4"]
-];
-  
-      const chords = [
-  ["F2", "C3", "G4"],
-  ["F2", "C3", "G4"],
-  ["F2", "A3", "C4", "E4"],
-  ["F2", "A3", "C4", "E4"],
-  
-  ["G2", "G3", "B3", "G4"],  
-  ["G2", "G3", "B3", "G4"],
-        
-  ["G2", "D3", "C4", "E4"],
-  ["G2", "D3", "C4", "E4"],
-        
-  ["A2", "A3", "C4", "B4"],
-  ["A2", "A3", "C4", "B4"],
-        
-  ["A2", "E3","E4", "G4"],
-  ["A2", "E3","E4", "G4"],
-        
-  ["A2", "E3", "A3", "E4","A4"],   
-  ["A2", "E3", "A3", "E4","A4"],   
-  ["A2", "C4", "G4"],
-  ["A2", "C4", "G4","E4"]
-];
-    
- const melos = [
-  
-  "C5", "D5", "E5", "C5",
-  "D5", "E5", "G5", "D5",
-  "C5", "D5", "E5", "G5",
-  "E5", "D5", "C5", "A5"
-];
-
-const melos2 = [
-  // 1行目
-  "C4", "-", "D4", "-", "E4", "-", "G4", "-",
-  // 2行目
-  "G5", "-", "F5", "-", "E4", "-", "D4", "-",
-  // 3行目
-  "C4", "C4", "D4", "D4", "E6", "E4", "G4", "G5",
-  // 4行目
-  "F5", "F5", "E5", "E5", "D5", "D5", "C6", "-",
-  // 5行目
-  "E5", "-", "F5", "-", "G5", "-", "A5", "-",
-  // 6行目
-  "A4", "-", "G5", "-", "F5", "-", "E5", "-",
-  // 7行目
-  "D4", "-", "E5", "-", "C5", "-", "D5", "-",
-  // 8行目
-  "C5", "-", "-",   "-",   "C5", "-", "B5", "-"
-];
-
-      
-const pat =[
-  1,0, 0, 1,  
-  0,0, 1, 0,
-  1,0, 1, 1, 
-  0,0, 1, 0,
-  1,0, 1, 0,  
-  0,1, 0, 1,
-  0,0, 1, 1, 
-  0,0, 0, 1
-];
-
-const patterns = {
-  kick:  [1, 0, 1, 0,  0,  0, 0, 0,
-          0, 0, 1, 0,  0,  0, 0, 0],
-  snare: [0, 0, 0, 0,  1,  0, 0, 0,
-          0, 0, 0, 0,  1,  0, 0, 0],
-  hh:    [1, 1, 1, 1,  1,  1, 1, 1,
-          1, 1, 1, 1,  1,  1, 1, 1]
-};
-
-const patterns2 = {
-  kick:  [1, 0, 0, 0,  1,  0, 0, 0,
-          1, 0, 0, 0,  1,  0, 0, 0],
-  snare: [0, 0, 0, 0,  1,  0, 0, 0,
-          0, 0, 0, 0,  1,  0, 0, 0],
-  hh:    [1, 1, 1, 1,  1,  1, 1, 1,
-          1, 1, 1, 1,  1,  1, 1, 1]
-};
-
-
-     let chord=[];
-
-     if(chord_count<4){
-       const idx = Math.floor(count / 4) % chords.length;
-       chord = chords[idx];
-     }else{
-       const idx2 = Math.floor(count / 4) % chords2.length;
-       chord = chords2[idx2];
-     }
-     const idx3 = Math.floor(count / 8)% melos.length;
-     const idx4 = Math.floor(count / 2)% melos2.length;
-     const melo = melos[idx3];
-     const melo2 = melos2[idx4];
-// map で「各ノート名を Tone.Frequency に変換 → transpose(12) → toNote() を返す」
-const octaveUpChord = chord.map((note) => {
-  return Tone.Frequency(note).transpose(12).toNote();
-});
-   
-if(count%2==0){
-   if(chord_count<4){
-    
-    synth.triggerAttackRelease(chord, "8n", time,0.2);
-    synth3.triggerAttackRelease(octaveUpChord, "8n", time,0.2);
-   }else{
-    synth.triggerAttackRelease(chord, "8n", time,0.2);
-    synth3.triggerAttackRelease(octaveUpChord, "8n", time,0.2);
-   }
-  
-     
-     if(melo != "-"){
-     synth.triggerAttackRelease(melo, "8n", time,0.2);
-     }
-     if(melo2 != "-"){
-     synth2.triggerAttackRelease(melo2, "8n", time,0.2);
-     }
-  }
-      if (patterns.kick[count%16]) {
-        sample.player("kick").start(time);
+    // ポップ音（明るいシンセ）
+    const popSynth = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: {
+        attack: 0.01,
+        decay: 0.2,
+        sustain: 0,
+        release: 0.1
       }
-      if (patterns.snare[count%16]) {
-        sample.player("snare").start(time);
+    }).toDestination();
+
+    // ドラム（キック）
+    const drum = new Tone.MembraneSynth({
+      pitchDecay: 0.05,
+      octaves: 6,
+      envelope: {
+        attack: 0.001,
+        decay: 0.3,
+        sustain: 0
       }
-      if (patterns.hh[count%16]) {
-        sample.player("hh").start(time);
+    }).toDestination();
+
+    // ベース
+    const bass = new Tone.MonoSynth({
+      oscillator: { type: "square" },
+      filter: { Q: 2, type: "lowpass", rolloff: -24 },
+      envelope: {
+        attack: 0.01,
+        decay: 0.3,
+        sustain: 0.4,
+        release: 0.8
+      },
+      filterEnvelope: {
+        attack: 0.01,
+        decay: 0.2,
+        sustain: 0.2,
+        release: 0.5,
+        baseFrequency: 50,
+        octaves: 2
       }
-    
-      count++;
-      count=count%256;
-      if(count%64==0){
-        chord_count++;  
-        chord_count=chord_count%8;
+    }).toDestination();
+
+    // ===== iOS対策：最初の操作で AudioContext 開始 =====
+    async function startAudio() {
+      if (!started) {
+        await Tone.start();
+        started = true;
+        console.log("AudioContext started");
       }
-    }, "16n");
-    
+    }
 
+    // ===== ボタン処理 =====
+    document.getElementById("popBtn").onclick = async () => {
+      await startAudio();
+      popSynth.triggerAttackRelease("C5", "8n");
+    };
 
-    // スタートボタン
-    document.getElementById("startBtn").addEventListener("click", async () => {
-      await Tone.start();  // AudioContext を起動
-      Tone.Transport.bpm.value = 160;
+    document.getElementById("drumBtn").onclick = async () => {
+      await startAudio();
+      drum.triggerAttackRelease("C1", "8n");
+    };
 
-      count = 0;           // カウント初期化
-      loop.start(0);       // ループ開始
-      Tone.Transport.start();  // タイムライン再生
-    });
-
-    // ストップボタン
-    document.getElementById("stopBtn").addEventListener("click", () => {
-      loop.stop();         // ループ停止
-      Tone.Transport.stop();   // タイムライン停止
-      Tone.Transport.cancel(); // スケジュールもリセット（任意）
-      console.log("Stopped");
-    });
+    document.getElementById("bassBtn").onclick = async () => {
+      await startAudio();
+      bass.triggerAttackRelease("C2", "4n");
+    };
   </script>
+
 </body>
 </html>
-
