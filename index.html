@@ -1,40 +1,38 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Walking Agency Synth Test</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Walking Agency – BPM Synth Switch</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
 <style>
-body {
-  font-family: sans-serif;
-  padding: 20px;
-  text-align: center;
-  background: #f0f0f0;
-}
-button {
-  font-size: 1.2rem;
-  padding: 15px 30px;
-  border-radius: 8px;
-  border: none;
-  background: #007AFF;
-  color: white;
-}
-#status {
-  margin-top: 20px;
-  font-weight: bold;
-  font-size: 1.2rem;
-}
-#debug {
-  margin-top: 10px;
-  font-family: monospace;
-}
-#params {
-  margin-top: 10px;
-  font-size: 0.9rem;
-}
+  body {
+    font-family: sans-serif;
+    padding: 20px;
+    text-align: center;
+    background: #f0f0f0;
+  }
+  button {
+    font-size: 1.2rem;
+    padding: 15px 30px;
+    border-radius: 8px;
+    border: none;
+    background: #007AFF;
+    color: white;
+    cursor: pointer;
+  }
+  #status {
+    margin-top: 20px;
+    font-weight: bold;
+    font-size: 1.2rem;
+  }
+  #debug {
+    margin-top: 10px;
+    font-family: monospace;
+    color: #444;
+  }
 </style>
 </head>
 
@@ -42,28 +40,28 @@ button {
 
 <button id="start">Start（iOSは要タップ）</button>
 <div id="status">停止中</div>
-<div id="debug">BPM: 0</div>
-<div id="params">Synth: ---</div>
+<div id="debug">BPM: -- / Synth: --</div>
 
 <script>
-// ===============================
-// 状態管理
-// ===============================
+// =================================================
+// グローバル
+// =================================================
 let isPlaying = false;
 let smoothedBPM = 60;
+
 let motionHistory = [];
 const HISTORY_DURATION = 4000;
 
 let synth = null;
 let currentSynthType = null;
 
-// シーケンス
+// 小節スケジューリング
 let nextBarTime = 0;
 let usePatternA = true;
 
-// ===============================
-// 音素材
-// ===============================
+// =================================================
+// メロディ
+// =================================================
 const patterns = {
   A: ["D4","C4","B3","D4","C4","A3","G3","A3","B3"],
   B: ["D4","C4","B3","D4","C4","A3","G3","B3","G3"]
@@ -71,9 +69,9 @@ const patterns = {
 
 const durations = [0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,1.0];
 
-// ===============================
-// Start
-// ===============================
+// =================================================
+// iOS 対策 & 開始
+// =================================================
 document.getElementById("start").addEventListener("click", async () => {
   await Tone.start();
 
@@ -89,13 +87,13 @@ document.getElementById("start").addEventListener("click", async () => {
   }
 
   window.addEventListener("devicemotion", handleMotion);
-  document.getElementById("status").innerText = "歩行待機中…";
+  document.getElementById("status").innerText = "歩行待機中...";
   document.getElementById("start").style.display = "none";
 });
 
-// ===============================
-// センサー処理
-// ===============================
+// =================================================
+// 加速度 → BPM
+// =================================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
@@ -104,88 +102,112 @@ function handleMotion(e) {
   const now = performance.now();
 
   motionHistory.push({ time: now, val: mag });
+
   while (motionHistory.length && now - motionHistory[0].time > HISTORY_DURATION) {
     motionHistory.shift();
   }
 
-  const avg = motionHistory.reduce((a,b)=>a+b.val,0) / motionHistory.length || 0;
+  const avg = motionHistory.reduce((s,i)=>s+i.val,0) / motionHistory.length;
   smoothedBPM = mapAccelToBPM(avg);
 
+  const synthType = getSynthTypeByBPM(smoothedBPM);
   document.getElementById("debug").innerText =
-    `Avg BPM: ${Math.floor(smoothedBPM)}`;
-
-  updateSynthByBPM(smoothedBPM);
+    `BPM: ${Math.floor(smoothedBPM)} / Synth: ${synthType}`;
 
   if (!isPlaying && mag > 13) {
     startSequence();
   }
 }
 
-// ===============================
-// 加速度 → BPM
-// ===============================
 function mapAccelToBPM(a) {
   let v = a - 9.8;
   if (v < 0) v = 0;
   let bpm = 60 + v * 15;
-  return Math.max(60, Math.min(180, bpm));
+  return Math.min(Math.max(bpm, 60), 180);
 }
 
-// ===============================
-// BPM → Synth 切替
-// ===============================
-function getSynthType(bpm) {
-  if (bpm >= 100 && bpm < 110) return "SOFT";
-  if (bpm >= 110 && bpm < 120) return "FM";
-  if (bpm >= 120) return "MONO";
-  return null;
+// =================================================
+// BPM → Synth 種別
+// =================================================
+function getSynthTypeByBPM(bpm) {
+  if (bpm >= 100 && bpm < 110) return "soft";
+  if (bpm >= 110 && bpm < 120) return "fm";
+  if (bpm >= 120) return "mono";
+  return "soft";
 }
 
-function updateSynthByBPM(bpm) {
-  const type = getSynthType(bpm);
-  if (!type || type === currentSynthType) return;
-
+// =================================================
+// Synth 生成
+// =================================================
+function createSynth(type) {
   if (synth) synth.dispose();
 
-  if (type === "SOFT") {
+  if (type === "soft") {
     synth = new Tone.PolySynth(Tone.Synth, {
       volume: 0,
       oscillator: { type: "triangle" },
-      envelope: { attack:0.005, decay:0.1, sustain:0.3, release:1 }
+      envelope: {
+        attack: 0.005,
+        decay: 0.1,
+        sustain: 0.3,
+        release: 1
+      }
     }).toDestination();
   }
 
-  if (type === "FM") {
+  if (type === "fm") {
     synth = new Tone.FMSynth({
       volume: 0,
       harmonicity: 3,
       modulationIndex: 12.22,
-      envelope: { attack:0.01, decay:0.2, sustain:1, release:0.5 },
-      modulation: { type:"square" },
-      modulationEnvelope: { attack:0.2, decay:0.01, sustain:1, release:0.5 }
+      envelope: {
+        attack: 0.01,
+        decay: 0.2,
+        sustain: 1,
+        release: 0.5
+      },
+      modulation: { type: "square" },
+      modulationEnvelope: {
+        attack: 0.2,
+        decay: 0.01,
+        sustain: 1,
+        release: 0.5
+      }
     }).toDestination();
   }
 
-  if (type === "MONO") {
+  if (type === "mono") {
     synth = new Tone.PolySynth(Tone.MonoSynth, {
       volume: -8,
-      oscillator: { type:"square8" },
-      filter: { type:"lowpass", rolloff:-12, Q:1 },
-      envelope: { attack:0.05, decay:0.3, sustain:0.4, release:0.8 },
+      oscillator: { type: "square8" },
+      filter: {
+        type: "lowpass",
+        rolloff: -12,
+        Q: 1
+      },
+      envelope: {
+        attack: 0.05,
+        decay: 0.3,
+        sustain: 0.4,
+        release: 0.8
+      },
       filterEnvelope: {
-        attack:0.001, decay:0.7, sustain:0.1, release:0.8,
-        baseFrequency:300, octaves:4
+        attack: 0.001,
+        decay: 0.7,
+        sustain: 0.1,
+        release: 0.8,
+        baseFrequency: 300,
+        octaves: 4
       }
     }).toDestination();
   }
 
   currentSynthType = type;
-  document.getElementById("params").innerText = `Synth: ${type}`;
 }
 
-// ===============================
+// =================================================
 // シーケンス
-// ===============================
+// =================================================
 function startSequence() {
   isPlaying = true;
   nextBarTime = Tone.now() + 0.1;
@@ -193,31 +215,39 @@ function startSequence() {
 }
 
 function scheduleBar() {
+  const bpm = smoothedBPM;
+  const synthType = getSynthTypeByBPM(bpm);
+
+  if (synthType !== currentSynthType) {
+    createSynth(synthType);
+  }
+
   const pattern = usePatternA ? patterns.A : patterns.B;
-  const beatDur = 60 / smoothedBPM;
+  const beatDur = 60 / bpm;
 
   let t = nextBarTime;
-  for (let i=0;i<pattern.length;i++) {
+
+  for (let i = 0; i < pattern.length; i++) {
     const dur = durations[i] * beatDur;
-    synth?.triggerAttackRelease(pattern[i], dur, t);
+    synth.triggerAttackRelease(pattern[i], dur, t);
     t += dur;
   }
 
-  nextBarTime += durations.reduce((a,b)=>a+b,0) * beatDur;
+  const totalBeats = durations.reduce((a,b)=>a+b,0);
+  nextBarTime += totalBeats * beatDur;
+
   usePatternA = !usePatternA;
 }
 
-// ===============================
-// ループ
-// ===============================
-Tone.Transport.scheduleRepeat(() => {
+// =================================================
+// 先読みループ
+// =================================================
+setInterval(() => {
   if (!isPlaying) return;
-  if (nextBarTime - Tone.now() < 0.2) {
+  if (nextBarTime - Tone.now() < 0.1) {
     scheduleBar();
   }
-}, 0.05);
-
-Tone.Transport.start();
+}, 25);
 </script>
 
 </body>
