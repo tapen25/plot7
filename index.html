@@ -1,107 +1,275 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>Tone.js One Shot Demo</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <meta charset="utf-8" />
+  <title>Tone.js 3 Synth Loop Layering</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/15.1.22/Tone.js"></script>
+
   <style>
     body {
-      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      font-family: system-ui, sans-serif;
       text-align: center;
-      padding-top: 50px;
-      background: #f5f5f5;
+      padding-top: 40px;
+      user-select: none;
     }
-    button {
+    h1 { font-size: 1.5rem; margin-bottom: 2rem; }
+    
+    /* トラック操作エリア */
+    .mixer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .track-btn {
       font-size: 18px;
       padding: 15px 30px;
-      margin: 10px;
-      border-radius: 8px;
-      border: none;
+      border: 2px solid #555;
+      background: #222;
+      color: #888;
+      border-radius: 50px;
       cursor: pointer;
+      width: 280px;
+      transition: all 0.2s ease;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* 押された状態（Active）のデザイン */
+    .track-btn.active {
+      background: #eee;
+      color: #111;
+      border-color: #fff;
+      box-shadow: 0 0 15px rgba(255,255,255,0.4);
+      transform: scale(1.02);
+    }
+    
+    /* 各楽器ごとの色分け（アクセント） */
+    .track-btn[data-inst="poly"].active { background: #00d2ff; border-color: #00d2ff; }
+    .track-btn[data-inst="fm"].active { background: #ff4b1f; border-color: #ff4b1f; }
+    .track-btn[data-inst="mono"].active { background: #1eff00; border-color: #1eff00; }
+
+    #start {
+      font-size: 16px;
+      padding: 10px 20px;
+      margin-bottom: 30px;
+      cursor: pointer;
+    }
+    .status {
+      font-size: 0.9rem;
+      color: #aaa;
+      margin-bottom: 10px;
     }
   </style>
 </head>
+
 <body>
 
-  <h1>Tone.js ワンショット音デモ</h1>
-  <p>ボタンを押すと1音鳴ります</p>
+  <h1>🎹 Loop Layering System</h1>
 
-  <button id="popBtn">Pop</button>
-  <button id="drumBtn">Drum</button>
-  <button id="bassBtn">Bass</button>
+  <div class="status">Step 1: Audio Startを押して再生開始</div>
+  <button id="start">▶ AUDIO START (Sequence)</button>
+
+  <hr style="border-color:#333; width: 50%; margin: 20px auto;">
+
+  <div class="status">Step 2: ボタンを押して楽器を重ねる</div>
+  
+  <div class="mixer">
+    <button class="track-btn" id="btnPoly" data-inst="poly">
+      <span>① Chords (Poly)</span>
+      <span>OFF</span>
+    </button>
+
+    <button class="track-btn" id="btnFM" data-inst="fm">
+      <span>② Metallic (FM)</span>
+      <span>OFF</span>
+    </button>
+
+    <button class="track-btn" id="btnMono" data-inst="mono">
+      <span>③ Bass (Mono)</span>
+      <span>OFF</span>
+    </button>
+  </div>
 
   <script>
-    let started = false;
+    // --- データ定義 ---
+    const patterns = {
+      A: ["G4","A4","B4","C5","B4","A4","G4","A4","B4"],
+      B: ["G4","A4","B4","C5","B4","A4","G4","B4","G4"]
+    };
+    // リズム（1.0 = 4分音符）
+    const durations = [0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 1.0];
 
-    // ===== 音色定義 =====
+    // --- 変数 ---
+    let polySynth, fmSynth, monoSynth;
+    let isPlaying = false;
 
-    // ポップ音（明るいシンセ）
-    const popSynth = new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: {
-        attack: 0.01,
-        decay: 0.2,
-        sustain: 0,
-        release: 0.1
-      }
-    }).toDestination();
+    // --- シーケンスデータの構築 ---
+    // AとBをつなげて1つのループデータを作る関数
+    function createMelodyEvents() {
+      const fullMelody = [...patterns.A, ...patterns.B];
+      const fullDurations = [...durations, ...durations]; // AとBで同じリズムを使う
+      
+      let currentTime = 0;
+      const events = [];
 
-    // ドラム（キック）
-    const drum = new Tone.MembraneSynth({
-      pitchDecay: 0.05,
-      octaves: 6,
-      envelope: {
-        attack: 0.001,
-        decay: 0.3,
-        sustain: 0
-      }
-    }).toDestination();
+      fullMelody.forEach((note, index) => {
+        // リズム数値(1.0)をTone.jsの記法("4n")の秒数に換算するための係数
+        // ここでは単純に "1.0 = 4n" と仮定して計算
+        // Tone.Time("4n").toSeconds() * duration値
+        
+        const durValue = fullDurations[index];
+        // durationが 0.25 なら 16分音符相当、1.0なら4分音符相当
+        // Tone.js的に扱いやすくするため、ここでは小節(Measure)単位ではなく、
+        // 単純な累積時間(秒ではないが拍数に近い概念)として計算し、再生時に解決させます。
+        
+        events.push({
+          time: currentTime,
+          note: note,
+          duration: durValue
+        });
 
-    // ベース
-    const bass = new Tone.MonoSynth({
-      oscillator: { type: "square" },
-      filter: { Q: 2, type: "lowpass", rolloff: -24 },
-      envelope: {
-        attack: 0.01,
-        decay: 0.3,
-        sustain: 0.4,
-        release: 0.8
-      },
-      filterEnvelope: {
-        attack: 0.01,
-        decay: 0.2,
-        sustain: 0.2,
-        release: 0.5,
-        baseFrequency: 50,
-        octaves: 2
-      }
-    }).toDestination();
-
-    // ===== iOS対策：最初の操作で AudioContext 開始 =====
-    async function startAudio() {
-      if (!started) {
-        await Tone.start();
-        started = true;
-        console.log("AudioContext started");
-      }
+        // 次の音の開始時間を加算 (1.0 = 1拍 = Tone.Transport.PPQ)
+        // ここでは便宜上、Quarter Note基準で時間を積算します
+        currentTime += durValue * (60 / 120); // 初期BPM120仮定での秒数換算に近い処理
+        // ※正確にはTone.Partは "0:0:0" 形式や秒数を受け付けます。
+        // シンプルにするため、再生時に「16n * multiplier」で長さを計算します。
+      });
+      return events;
     }
 
-    // ===== ボタン処理 =====
-    document.getElementById("popBtn").onclick = async () => {
-      await startAudio();
-      popSynth.triggerAttackRelease("C5", "8n");
-    };
 
-    document.getElementById("drumBtn").onclick = async () => {
-      await startAudio();
-      drum.triggerAttackRelease("C1", "8n");
-    };
+    // --- メイン処理 ---
+    document.getElementById("start").addEventListener("click", async (e) => {
+      if (isPlaying) return;
+      
+      await Tone.start();
+      Tone.Transport.bpm.value = 130; // 少しテンポアップ
 
-    document.getElementById("bassBtn").onclick = async () => {
-      await startAudio();
-      bass.triggerAttackRelease("C2", "4n");
-    };
+      // 1. シンセの初期化（Volumeは -Infinity で開始＝ミュート状態）
+      
+      // ① PolySynth
+      polySynth = new Tone.PolySynth(Tone.Synth, {
+        volume: -Infinity, // 最初は聞こえない
+        oscillator: { type: "triangle" },
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1 }
+      }).toDestination();
+
+      // ② FM Synth
+      fmSynth = new Tone.FMSynth({
+        volume: -Infinity, // 最初は聞こえない
+        harmonicity: 3,
+        modulationIndex: 10,
+        envelope: { attack: 0.01, decay: 0.2 },
+        modulation: { type: "square" }
+      }).toDestination();
+
+      // ③ MonoSynth
+      monoSynth = new Tone.PolySynth(Tone.MonoSynth, { // 和音で来ても大丈夫なようにPolyでラップ
+        volume: -Infinity, // 最初は聞こえない
+        oscillator: { type: "square8" },
+        filter: { type: "lowpass", rolloff: -12, Q: 1 },
+        envelope: { attack: 0.05, decay: 0.3, sustain: 0.4, release: 0.8 }
+      }).toDestination();
+
+
+      // 2. ループ再生のセットアップ (Tone.Part)
+      // データ作成: Aパターン + Bパターン
+      // リズム数値(0.25等)をTone.jsの時間("0:0:2"等)にマッピングするのは複雑なので、
+      // 累積時間(beat)を使ってスケジュールします。
+      
+      const combinedNotes = [...patterns.A, ...patterns.B];
+      const combinedDurs = [...durations, ...durations];
+      
+      let timeAccumulator = 0;
+      const partEvents = combinedNotes.map((note, i) => {
+        const d = combinedDurs[i];
+        
+        // 4分音符=1.0 という定義なので、
+        // 0.25 = 16分音符(16n), 0.5 = 8分音符(8n), 1.0 = 4分音符(4n)
+        let toneDuration;
+        if(d === 0.25) toneDuration = "16n";
+        else if(d === 0.5) toneDuration = "8n";
+        else toneDuration = "4n";
+
+        const event = { time: timeAccumulator, note: note, dur: toneDuration };
+        
+        // 次の開始時間を計算 (Tone.Timeで足し算)
+        timeAccumulator = Tone.Time(timeAccumulator).add(toneDuration).toNotation();
+        
+        return event;
+      });
+
+      // Part作成
+      const part = new Tone.Part((time, value) => {
+        // 3つのシンセを同時にトリガー（音量はvolumeプロパティで制御される）
+        
+        // ① Poly: そのまま
+        polySynth.triggerAttackRelease(value.note, value.dur, time);
+        
+        // ② FM: そのまま (少し短く弾く)
+        fmSynth.triggerAttackRelease(value.note, "16n", time);
+        
+        // ③ Mono: ベースなのでオクターブ下げる (G4 -> G2)
+        // Tone.Frequency(note).transpose(-24) で2オクターブ下
+        const bassNote = Tone.Frequency(value.note).transpose(-12); 
+        monoSynth.triggerAttackRelease(bassNote, value.dur, time);
+
+      }, partEvents);
+
+      part.loop = true;
+      part.loopEnd = timeAccumulator; // 計算した合計時間がループ長
+      part.start(0);
+
+      // トランスポート開始
+      Tone.Transport.start();
+      
+      isPlaying = true;
+      e.target.innerText = "Playing... (Click buttons below)";
+      e.target.disabled = true;
+    });
+
+
+    // --- ボタン操作（ミュート/アンミュート切り替え） ---
+    
+    function toggleTrack(btnId, synth, activeVolume = 0) {
+      const btn = document.getElementById(btnId);
+      let isActive = false;
+
+      btn.addEventListener("click", () => {
+        if (!isPlaying) {
+          alert("先に 'AUDIO START' を押してください");
+          return;
+        }
+
+        isActive = !isActive;
+
+        if (isActive) {
+          // ON: ボリュームを上げる
+          btn.classList.add("active");
+          btn.querySelector("span:last-child").innerText = "ON";
+          synth.volume.rampTo(activeVolume, 0.1); // 0.1秒でフェードイン
+        } else {
+          // OFF: ボリュームを下げる（-Infinityで無音）
+          btn.classList.remove("active");
+          btn.querySelector("span:last-child").innerText = "OFF";
+          synth.volume.rampTo(-Infinity, 0.1); // 0.1秒でフェードアウト
+        }
+      });
+    }
+
+    // 各ボタンに機能を割り当て
+    // 第3引数はONのときの音量(db)
+    toggleTrack("btnPoly", polySynth, -2);  
+    toggleTrack("btnFM", fmSynth, -2);
+    toggleTrack("btnMono", monoSynth, -6); // 低音は少し控えめに
+
   </script>
-
 </body>
 </html>
