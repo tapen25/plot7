@@ -1,250 +1,405 @@
+// ...existing code...
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Walking Agency – BPM Synth Switch</title>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-
+<title>Walking Agency Filter Test</title>
 <style>
-  body {
-    font-family: sans-serif;
-    padding: 20px;
-    text-align: center;
-    background: #f0f0f0;
-  }
-  button {
-    font-size: 1.2rem;
-    padding: 15px 30px;
-    border-radius: 8px;
-    border: none;
-    background: #007AFF;
-    color: white;
-    cursor: pointer;
-  }
-  #status {
-    margin-top: 20px;
-    font-weight: bold;
-    font-size: 1.2rem;
-  }
-  #debug {
-    margin-top: 10px;
-    font-family: monospace;
-    color: #444;
-  }
+  body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; }
+  button { font-size: 1.2rem; padding: 15px 30px; border-radius: 8px; border: none; background: #007AFF; color: white; cursor: pointer; }
+  #status { margin-top: 20px; font-weight: bold; font-size: 1.2rem; }
+  #debug { margin-top: 10px; color: #555; font-family: monospace; }
+  #params { margin-top: 10px; font-size: 0.9rem; color: #333; }
 </style>
 </head>
-
 <body>
 
-<button id="start">Start（iOSは要タップ）</button>
+<button id="start">Start (iOSは要タップ)</button>
 <div id="status">停止中</div>
-<div id="debug">BPM: -- / Synth: --</div>
+<div id="debug">BPM: 0</div>
+<div id="params">Tone: ---</div>
 
 <script>
-// =================================================
-// グローバル
-// =================================================
+let audioCtx;
 let isPlaying = false;
-let smoothedBPM = 60;
 
-let motionHistory = [];
-const HISTORY_DURATION = 4000;
-
-let synth = null;
-let currentSynthType = null;
-
-// 小節スケジューリング
-let nextBarTime = 0;
+// パターン切替
 let usePatternA = true;
 
-// =================================================
-// メロディ
-// =================================================
+// 平均BPM（初期値）
+let smoothedBPM = 60;
+
+// 加速度の履歴
+let motionHistory = [];
+// 要望に合わせて「3〜5秒」の中間をとって4秒に設定
+const HISTORY_DURATION = 4000; 
+
+// 小節スケジューリング用
+let nextBarTime = 0;
+
+// パターン定義
 const patterns = {
   A: ["D4","C4","B3","D4","C4","A3","G3","A3","B3"],
   B: ["D4","C4","B3","D4","C4","A3","G3","B3","G3"]
 };
 
+// リズム（4分＝1.0）
 const durations = [0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,1.0];
 
-// =================================================
-// iOS 対策 & 開始
-// =================================================
-document.getElementById("start").addEventListener("click", async () => {
-  await Tone.start();
+// ---------------------------
+// 音名→周波数
+// ---------------------------
+function noteToFreq(note, offset = 0) {
+  const map = {
+    G3:-14, A3:-12, B3:-10,
+    C4:-9,  D4:-7,  E4:-5, F4:-4, G4:-2, A4:0, B4:2,
+    C5:3
+  };
+  let semitone = map[note] ?? 0;
+  semitone += offset;
+  return 440 * Math.pow(2, semitone/12);
+}
 
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
-    const res = await DeviceMotionEvent.requestPermission();
-    if (res !== "granted") {
-      alert("モーションセンサーの許可が必要です");
-      return;
+document.getElementById("start").onclick = async () => {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === "suspended") {
+    await audioCtx.resume();
+  }
+
+  // iOS 13+ DeviceMotion Permission
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+    try {
+      const permissionState = await DeviceMotionEvent.requestPermission();
+      if (permissionState !== 'granted') {
+        alert("センサー許可が必要です");
+        return;
+      }
+    } catch (e) {
+      console.error(e);
     }
   }
 
   window.addEventListener("devicemotion", handleMotion);
-  document.getElementById("status").innerText = "歩行待機中...";
-  document.getElementById("start").style.display = "none";
-});
+  document.getElementById("status").innerText = "歩行待機中(強めに歩いて開始)...";
+  document.getElementById("start").style.display = 'none';
+};
 
-// =================================================
-// 加速度 → BPM
-// =================================================
+// ---------------------------
+// センサー処理 → 平均BPM算出
+// ---------------------------
 function handleMotion(e) {
-  const acc = e.accelerationIncludingGravity;
+  const acc = e.accelerationIncludingGravity; // Android/iOS差分吸収のため重力込みを使用
   if (!acc) return;
 
+  // 重力込みのベクトル長から簡易的に動きの大きさを取る
+  // (静止時でも9.8付近になるが、相対変化を見るため簡易実装)
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
   const now = performance.now();
 
-  motionHistory.push({ time: now, val: mag });
-
-  while (motionHistory.length && now - motionHistory[0].time > HISTORY_DURATION) {
+  motionHistory.push({time: now, val: mag});
+  
+  // 履歴期間外を削除
+  while(motionHistory.length > 0 && now - motionHistory[0].time > HISTORY_DURATION) {
     motionHistory.shift();
   }
 
-  const avg = motionHistory.reduce((s,i)=>s+i.val,0) / motionHistory.length;
+  // 平均計算
+  let sum = 0;
+  motionHistory.forEach(i => sum += i.val);
+  const avg = sum / motionHistory.length || 0;
+
+  // 加速度からBPMへのマッピング
   smoothedBPM = mapAccelToBPM(avg);
 
-  const synthType = getSynthTypeByBPM(smoothedBPM);
-  document.getElementById("debug").innerText =
-    `BPM: ${Math.floor(smoothedBPM)} / Synth: ${synthType}`;
+  // デバッグ表示
+  const isHigh = smoothedBPM >= 110;
+  document.getElementById("debug").innerText = 
+    `Avg BPM: ${Math.floor(smoothedBPM)} ${isHigh?"🔥Active":""}`;
 
+  // 音色のデバッグ表示（今のBPMでどういうフィルタになるか）
+  const fInfo = getFilterParams(smoothedBPM);
+  document.getElementById("params").innerText = 
+    `Cutoff: ${Math.floor(fInfo.freq)}Hz (${fInfo.desc})  ◦ Synth: ${synthDescriptor(smoothedBPM)}`;
+
+  // 開始トリガー（閾値はデバイスによって調整が必要かもしれません）
+  // 重力分(約9.8) + 動き分。ここでは13程度を閾値に設定
   if (!isPlaying && mag > 13) {
     startSequence();
   }
 }
 
+function synthDescriptor(bpm){
+  if (bpm >= 120) return "PolyMono (square8-like)";
+  if (bpm >= 110) return "FM (bright)";
+  if (bpm >= 100) return "PolyTri (soft)";
+  return "Soft Simple";
+}
+
 function mapAccelToBPM(a) {
-  let v = a - 9.8;
-  if (v < 0) v = 0;
-  let bpm = 60 + v * 15;
-  return Math.min(Math.max(bpm, 60), 180);
+  // 重力分(約9.8)を引いた「動き成分」で計算
+  let val = a - 9.8; 
+  if (val < 0) val = 0;
+
+  // 係数は歩き方に合わせて調整
+  let bpm = 60 + (val * 15); 
+
+  if (bpm < 60) bpm = 60;
+  if (bpm > 180) bpm = 180;
+  return bpm;
 }
 
-// =================================================
-// BPM → Synth 種別
-// =================================================
-function getSynthTypeByBPM(bpm) {
-  if (bpm >= 100 && bpm < 110) return "soft";
-  if (bpm >= 110 && bpm < 120) return "fm";
-  if (bpm >= 120) return "mono";
-  return "soft";
+// ---------------------------
+// フィルタパラメータの算出
+// ---------------------------
+function getFilterParams(bpm) {
+  let t = (bpm - 60) / (140 - 60); // 0.0 〜 1.0
+  if (t < 0) t = 0;
+  if (t > 1) t = 1;
+
+  const minFreq = 300;
+  const maxFreq = 1000;
+  const freq = minFreq * Math.pow(maxFreq / minFreq, t);
+  const q = 1 + t * 4; 
+
+  let desc = "Soft/Muffled";
+  if (t > 0.4) desc = "Medium";
+  if (t > 0.8) desc = "Bright/Brass";
+
+  return { freq, q, desc };
 }
 
-// =================================================
-// Synth 生成
-// =================================================
-function createSynth(type) {
-  if (synth) synth.dispose();
-
-  if (type === "soft") {
-    synth = new Tone.PolySynth(Tone.Synth, {
-      volume: 0,
-      oscillator: { type: "triangle" },
-      envelope: {
-        attack: 0.005,
-        decay: 0.1,
-        sustain: 0.3,
-        release: 1
-      }
-    }).toDestination();
-  }
-
-  if (type === "fm") {
-    synth = new Tone.FMSynth({
-      volume: 0,
-      harmonicity: 3,
-      modulationIndex: 12.22,
-      envelope: {
-        attack: 0.01,
-        decay: 0.2,
-        sustain: 1,
-        release: 0.5
-      },
-      modulation: { type: "square" },
-      modulationEnvelope: {
-        attack: 0.2,
-        decay: 0.01,
-        sustain: 1,
-        release: 0.5
-      }
-    }).toDestination();
-  }
-
-  if (type === "mono") {
-    synth = new Tone.PolySynth(Tone.MonoSynth, {
-      volume: -8,
-      oscillator: { type: "square8" },
-      filter: {
-        type: "lowpass",
-        rolloff: -12,
-        Q: 1
-      },
-      envelope: {
-        attack: 0.05,
-        decay: 0.3,
-        sustain: 0.4,
-        release: 0.8
-      },
-      filterEnvelope: {
-        attack: 0.001,
-        decay: 0.7,
-        sustain: 0.1,
-        release: 0.8,
-        baseFrequency: 300,
-        octaves: 4
-      }
-    }).toDestination();
-  }
-
-  currentSynthType = type;
-}
-
-// =================================================
-// シーケンス
-// =================================================
+// ---------------------------
+// シーケンス開始
+// ---------------------------
 function startSequence() {
   isPlaying = true;
-  nextBarTime = Tone.now() + 0.1;
+  nextBarTime = audioCtx.currentTime + 0.1; 
   document.getElementById("status").innerText = "再生中";
 }
 
+// ---------------------------
+// 1小節スケジューリング
+// ---------------------------
 function scheduleBar() {
-  const bpm = smoothedBPM;
-  const synthType = getSynthTypeByBPM(bpm);
+  const pattern = usePatternA ? patterns.A : patterns.B;
+  // 小節の長さは「その瞬間の smoothedBPM」を元に決めるが
+  // 音色 (synth) は小節開始時の BPM に基づいて統一する（小節毎に音色切替）
+  const currentBarBPM = smoothedBPM;
+  const beatDur = 60 / currentBarBPM; // この時点のBPMで小節の長さを決定
+  const now = audioCtx.currentTime;
+  
+  const filterParams = getFilterParams(currentBarBPM);
 
-  if (synthType !== currentSynthType) {
-    createSynth(synthType);
+  if (nextBarTime < now) {
+    nextBarTime = now + 0.05;
   }
 
-  const pattern = usePatternA ? patterns.A : patterns.B;
-  const beatDur = 60 / bpm;
-
-  let t = nextBarTime;
+  let cursor = nextBarTime;
 
   for (let i = 0; i < pattern.length; i++) {
-    const dur = durations[i] * beatDur;
-    synth.triggerAttackRelease(pattern[i], dur, t);
-    t += dur;
+    const beatLen = durations[i];
+    const durSec = beatLen * beatDur;
+
+    const freq = noteToFreq(pattern[i], 0);
+
+    // BPMに応じた「音構成」を適用（playTone に BPM を渡す）
+    playTone(freq, cursor, durSec, filterParams, currentBarBPM);
+    
+    cursor += durSec;
   }
 
-  const totalBeats = durations.reduce((a,b)=>a+b,0);
+  // 次の小節頭へ
+  const totalBeats = durations.reduce((a,b)=>a+b, 0);
   nextBarTime += totalBeats * beatDur;
 
   usePatternA = !usePatternA;
 }
 
-// =================================================
-// 先読みループ
-// =================================================
+// ---------------------------
+// 音再生（BPMレンジに応じて音色を分岐、Tone.js ではなく WebAudioで再現）
+// - 第5引数 bpm を使って 3レンジを切替（提示された Tone 設定を近似）
+// ---------------------------
+function playTone(freq, time, dur, fParams, bpm) {
+  // common gain target
+  const maxGain = 0.4;
+
+  if (bpm >= 120) {
+    // --- BPM120以上: PolySynth(MonoSynth) に近い挙動（square8風） ---
+    // 実装: 2台のオシレータ（少しデチューン） + ローパス + フィルタエンベロープ
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    osc1.type = "square";
+    osc2.type = "square";
+    osc1.frequency.value = freq;
+    osc2.frequency.value = freq * 1.0015; // 微デチューン
+
+    filter.type = "lowpass";
+    filter.frequency.value = fParams.freq; // base
+    filter.Q.value = fParams.q;
+
+    // 接続
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    // フィルタエンベロープ（提示値を近似）
+    // attack:0.001 -> 急速に開く, decay:0.7, sustain:0.1, release:0.8
+    const now = time;
+    filter.frequency.setValueAtTime(fParams.freq * 0.2, now);
+    filter.frequency.linearRampToValueAtTime(fParams.freq, now + 0.05);
+    // フィルタリリースは単純にフェードさせる（線形）
+    filter.frequency.linearRampToValueAtTime(fParams.freq * 0.3, now + dur * 0.9);
+
+    // 音量エンベロープ
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(maxGain * 0.9, now + 0.05); // attack 0.05
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    osc1.start(time);
+    osc2.start(time);
+    osc1.stop(time + dur);
+    osc2.stop(time + dur);
+
+    // cleanup - disconnect after stop
+    setTimeout(() => {
+      try { osc1.disconnect(); osc2.disconnect(); filter.disconnect(); gain.disconnect(); } catch(e){}
+    }, (time - audioCtx.currentTime + dur + 0.2) * 1000);
+
+    return;
+  }
+
+  if (bpm >= 110) {
+    // --- BPM110~119: FMSynth っぽい挙動を簡易実装 ---
+    // 設定を近似:
+    // harmonicity: 3, modulationIndex: ~12.22
+    // modulation type: square
+    // envelope: attack:0.01, decay:0.2, sustain:1, release:0.5
+    // modulationEnvelope: attack:0.2, decay:0.01, sustain:1, release:0.5
+
+    const carrier = audioCtx.createOscillator();
+    const mod = audioCtx.createOscillator();
+    const modGain = audioCtx.createGain();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    // carrier / mod types
+    carrier.type = "sawtooth";
+    mod.type = "square";
+
+    carrier.frequency.value = freq;
+    // harmonicity 3 => mod frequency = carrier * 3
+    const harmonicity = 3;
+    mod.frequency.value = freq * harmonicity;
+
+    // modulation index scaling -> modulation amplitude in Hz
+    // 12.22 をそのまま使うと大きすぎるのでスケールダウン empirically
+    const modulationIndex = 12.22;
+    modGain.gain.setValueAtTime(0, time); // will be ramped by modulation envelope
+
+    // connect mod -> modGain -> carrier.frequency
+    mod.connect(modGain);
+    modGain.connect(carrier.frequency);
+
+    // filter to shape tone
+    filter.type = "lowpass";
+    filter.frequency.value = fParams.freq;
+    filter.Q.value = fParams.q;
+
+    carrier.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    // carrier amplitude envelope
+    const now = time;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(maxGain * 0.6, now + 0.01); // attack 0.01
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.01);
+
+    // modulation envelope (ramp modGain.gain from 0 to modulationIndexScale)
+    // use modulationEnvelope attack 0.2s fast for this context but clipped to note length
+    const modEnvAttack = Math.min(0.2, dur * 0.5);
+    const modEnvDecay = 0.01;
+    const modTarget = modulationIndex * 1.2; // scale factor to sound reasonable
+
+    modGain.gain.setValueAtTime(0.0001, now);
+    modGain.gain.linearRampToValueAtTime(modTarget, now + modEnvAttack);
+    // small decay to sustain
+    modGain.gain.linearRampToValueAtTime(modTarget * 0.9, now + modEnvAttack + modEnvDecay);
+    // release
+    modGain.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.05);
+
+    // start/stop
+    mod.start(time - 0.01);
+    carrier.start(time - 0.01);
+    mod.stop(time + dur + 0.02);
+    carrier.stop(time + dur + 0.02);
+
+    // cleanup
+    setTimeout(() => {
+      try { mod.disconnect(); modGain.disconnect(); carrier.disconnect(); filter.disconnect(); gain.disconnect(); } catch(e){}
+    }, (time - audioCtx.currentTime + dur + 0.4) * 1000);
+
+    return;
+  }
+
+  // --- BPM100~109: PolySynth(Tone.Synth) に近い柔らかい三角波 ---
+  // emulate: triangle oscillator, envelope attack:0.005, decay:0.1, sustain:0.3, release:1
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+
+  osc.type = "triangle";
+  osc.frequency.value = freq;
+
+  // gentle lowpass to mellow
+  filter.type = "lowpass";
+  filter.frequency.value = fParams.freq * 0.7;
+  filter.Q.value = fParams.q * 0.6;
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  const now = time;
+  // envelope
+  const a = 0.005;
+  const d = 0.1;
+  const s = 0.3;
+  const r = 1.0;
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(maxGain * 0.5, now + a);
+  // decay to sustain level
+  const sustainLevel = maxGain * s;
+  gain.gain.linearRampToValueAtTime(sustainLevel, now + a + d);
+  // release
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur + r * 0.1);
+
+  osc.start(time);
+  osc.stop(time + dur + 0.05);
+
+  // cleanup
+  setTimeout(() => {
+    try { osc.disconnect(); filter.disconnect(); gain.disconnect(); } catch(e){}
+  }, (time - audioCtx.currentTime + dur + 0.4) * 1000);
+}
+
+// ---------------------------
+// ループ監視
+// ---------------------------
 setInterval(() => {
   if (!isPlaying) return;
-  if (nextBarTime - Tone.now() < 0.1) {
+  const now = audioCtx.currentTime;
+  // 先読み
+  if (nextBarTime - now < 0.1) {
     scheduleBar();
   }
 }, 25);
@@ -252,3 +407,4 @@ setInterval(() => {
 
 </body>
 </html>
+// ...existing code...
