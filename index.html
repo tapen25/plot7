@@ -1,351 +1,136 @@
+
 <!DOCTYPE html>
-<html lang="ja">
+<html dir="ltr" lang="en-US">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Motion Music V6 - Gentle & Clear</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-    <style>
-        body { 
-            font-family: 'Helvetica Neue', Arial, sans-serif; 
-            text-align: center; 
-            padding: 20px; 
-            /* 優しい色合いのグラデーション */
-            background: linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%); 
-            color: #555; 
-            height: 100vh; 
-            overflow: hidden; 
-            user-select: none;
-        }
-        h1 { font-weight: 200; letter-spacing: 0.1em; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        p { color: #fff; font-size: 1rem; opacity: 0.95; }
-        
-        #startBtn { 
-            padding: 20px 50px; font-size: 1.2rem; 
-            background: rgba(255,255,255,0.9); border: none; 
-            border-radius: 50px; color: #6a85b6; cursor: pointer; 
-            margin-top: 30px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); 
-            transition: transform 0.1s;
-        }
-        #startBtn:active { transform: scale(0.95); }
 
-        #status { 
-            margin-top: 40px; 
-            background: rgba(255,255,255,0.8); 
-            padding: 25px; 
-            border-radius: 20px; 
-            display: inline-block; 
-            min-width: 280px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-            backdrop-filter: blur(5px);
-        }
-        .data { font-weight: bold; font-size: 1.8rem; color: #6a85b6; }
-        .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-        
-        #mode-display {
-            margin-top: 15px; font-size: 1.2rem; font-weight: bold; color: #555;
-            padding: 5px 15px; border-radius: 10px; background: #fff; display: inline-block;
-        }
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+    <meta name="N.P. Brosowsky" content="Tone.js instrument library loader" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-        #wind-indicator {
-            height: 6px; background: #eee; width: 220px; margin: 15px auto 5px; border-radius: 3px; overflow: hidden;
-        }
-        #wind-bar {
-            height: 100%; width: 0%; background: linear-gradient(90deg, #6a85b6 0%, #a1c4fd 100%); transition: width 0.1s;
-        }
-    </style>
+
+    <!-- Styling -->
+    <link rel="stylesheet" href="nprogress.css" type="text/css" />
+    <!-- Document Title
+	============================================= -->
+    <title>ToneJS-Instruments Demo</title>
+
 </head>
+
 <body>
-
-<h1>Motion Music V6</h1>
-<p>Soft Wind & Clear Melody</p>
-
-<button id="startBtn">START</button>
-
-<div id="status">
-    <div class="label">BPM</div>
-    <div id="bpmVal" class="data">100</div>
-    
-    <div style="margin-top:20px;" class="label">Soft Wind</div>
-    <div id="wind-indicator"><div id="wind-bar"></div></div>
-
-    <div style="margin-top:20px;" class="label">Story</div>
-    <div id="mode-display">Calm (日常)</div>
-</div>
-
-<script>
-// ============================================================
-// 1. 設定・変数
-// ============================================================
-const BUFFER_SIZE = 20;
-const motionBuffer = [];
-let instantMotion = 0; 
-let smoothedMotion = 0; 
-let isPlaying = false;
-
-// ============================================================
-// 2. コード進行 (Story)
-// ============================================================
-const chordsCalm = [
-  ["C4","E4","G4","B4"], 
-  ["A3","C4","E4","G4"], 
-  ["F3","A3","C4","E4"], 
-  ["G3","B3","D4","F4"]
-];
-
-const chordsActive = [
-  ["D4","F4","A4","C5"], 
-  ["E4","G4","B4","D5"], 
-  ["F4","A4","C5","E5"], 
-  ["G4","C5","D5","F5"] 
-];
-
-// ============================================================
-// 3. シンセ・音色設定 (ここを重点的に変更)
-// ============================================================
-let chordSynth, bassSynth, melodySynth;
-let kick, shaker;
-let windSynth, windFilter;
-let chorus, reverb, delay;
-
-function setupSynths() {
-    // --- Effects ---
-    reverb = new Tone.Reverb({ decay: 5, wet: 0.4 }).toDestination();
-    chorus = new Tone.Chorus(2.5, 3.5, 0.5).connect(reverb).start();
-    // メロディ用ディレイ（PingPongで左右に振って際立たせる）
-    delay  = new Tone.PingPongDelay("8n.", 0.3).connect(reverb);
-
-    // --- 1. Chords (Strings) ---
-    // 柔らかいストリングス
-    chordSynth = new Tone.PolySynth(Tone.Synth, {
-        volume: -14,
-        oscillator: {
-        type: "triangle8", // ★三角波＋やわらかい倍音 → 優しくなる
-        partials: [1,0.4,0.2,0.1], // ★倍音を滑らかに減衰
-        },
-        envelope: {
-        attack: 1.6,  // ★ゆっくりふわっと入る
-        decay: 0.4,
-        sustain: 0.7, // しっかり伸びるけど主張しない
-        release: 3.5  // ★余韻長めでやさしい
+    <style type="text/css">
+        body {
+            height: 100vh;
+            width: 100vw;
+            font-family: Helvetica, arial;
+            font-size: 16px;
         }
-    }).connect(chorus);
 
-    // --- 2. Melody (Clear Bell/Keys) ★変更点 ---
-    // AMSynthを使って、倍音を含んだ「通る音」にする
-    melodySynth = new Tone.AMSynth({
-        volume: 5, // ★音量を上げて目立たせる
-        harmonicity: 2.0, // 倍音成分
-        modulationIndex: 2.5,
-        oscillator: { type: "sine" },     // 丸い基音
-        modulation: { type: "triangle" }, // 煌びやかさを足す
-        envelope: {
-            attack: 0.01, // 素早いアタックではっきりさせる
-            decay: 0.3,
-            sustain: 0.4,
-            release: 1.2
-        },
-        modulationEnvelope: {
-            attack: 0.01,
-            decay: 0.2,
-            sustain: 0.2,
-            release: 1.0
+        #content {
+            height: 100%;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
         }
-    }).connect(delay); // ディレイのみに通して、リバーブの濁りを避ける手もありだが、今回はDelay->Reverbチェーン
 
-    // --- 3. Bass (Gentle Sine) ★変更点 ---
-    // サイン波で優しく包み込む
-    bassSynth = new Tone.MonoSynth({
-        volume: -6,
-        oscillator: { type: "sine" }, // ★丸い音
-        envelope: { 
-            attack: 0.5, // ぼわーんと入る
-            decay: 0.5, 
-            sustain: 0.8, 
-            release: 2 
-        },
-        filter: { type: "lowpass", frequency: 200 } // 不要な高域をカット
-    }).connect(reverb);
-
-    // --- 4. Drums ---
-    kick = new Tone.MembraneSynth({ volume: -8 }).toDestination(); // 少し控えめに
-    shaker = new Tone.NoiseSynth({ volume: -24, envelope: { decay: 0.1 } }).connect(reverb);
-
-    // --- 5. Wind (Soft Breeze) ★変更点 ---
-    windFilter = new Tone.Filter({
-    type: "bandpass",  // ★帯域だけ通す（爽やかさUP）
-    frequency: 3000,   // 中心周波数
-    Q: 0.6             // 幅広めにして自然に
-}).connect(reverb);
-
-windSynth = new Tone.NoiseSynth({
-    volume: -18, // ★以前より大きくして「風っぽさ」を得る
-    noise: { type: "white" }, // ★ホワイトノイズで「ヒュー感」
-    envelope: {
-        attack: 0.005, // ★超高速アタック → 風を切る感じ
-        decay: 0.25,  // ★減衰短め → 風切りの爽快感
-        sustain: 0.0, // 維持しない
-        release: 0.1  // 残さない
-    }
-});
-windSynth.connect(windFilter);
-}
-
-// ============================================================
-// 4. ミュージックループ
-// ============================================================
-function startMusicLoop() {
-    Tone.Transport.bpm.value = 100;
-    windSynth.triggerAttack();
-
-    // --- Chords & Bass ---
-    Tone.Transport.scheduleRepeat((time) => {
-        const bar = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ * 4)) % 4;
-        
-        // Story Switching
-        const isHighEnergy = smoothedMotion > 0.6;
-        const currentProgression = isHighEnergy ? chordsActive : chordsCalm;
-        
-        const chord = currentProgression[bar];
-        chordSynth.releaseAll();
-        chordSynth.triggerAttackRelease(chord, "1n", time);
-
-        // Bass (Root)
-        bassSynth.triggerAttackRelease(Tone.Frequency(chord[0]).transpose(-12), "1n", time);
-
-    }, "1n");
-
-    // --- Melody (More Active) ---
-    Tone.Transport.scheduleRepeat((time) => {
-        // 確率を少し上げてメロディの頻度を増やす
-        if (Math.random() < 0.5 + (smoothedMotion * 0.3)) {
-            // ペンタトニック + α の音階
-            const notes = ["C5","D5","E5","G5","A5","C6"];
-            const note = notes[Math.floor(Math.random() * notes.length)];
-            
-            // 16分音符で少しズラして人間味を出す
-            melodySynth.triggerAttackRelease(note, "8n", time + Math.random()*0.02);
+        .container {
+            display: none;
         }
-    }, "8n");
 
-    // --- Rhythm ---
-    Tone.Transport.scheduleRepeat((time) => {
-        const beat = Math.floor(Tone.Transport.ticks / (Tone.Transport.PPQ / 4)) % 16;
-        
-        if (beat % 4 === 0) kick.triggerAttackRelease("C2", "8n", time);
-        
-        if (smoothedMotion > 0.3) {
-            if (beat % 2 === 0) shaker.triggerAttackRelease("32n", time);
+        #Keyboard {
+            margin: 3px!important;
         }
-        if (smoothedMotion > 0.7 && beat % 2 !== 0) {
-            shaker.triggerAttackRelease("32n", time, 0.5); 
-        }
-    }, "16n");
 
-    Tone.Transport.start();
-}
+    </style>
+    <div id="content">
+        <H3 id="loading">Loading...</H3>
+        <div class="container">
+            <h1> Tone.js-Instruments</h1>
+            <p> (all instruments) </p>
+            <div id="Selector"></div>
+            <br/>
+            <div id="Keyboard"></div>
+        </div>
 
-// ============================================================
-// 5. センサー処理
-// ============================================================
-function handleMotion(event) {
-    const a = event.accelerationIncludingGravity;
-    if (!a) return;
+    </div>
+    <script type="text/javascript" src="external-js/nprogress.js"></script>
+    <script type="text/javascript" src="external-js/NexusUI.js"></script>
+    <script type="text/javascript" src="external-js/Tone.js"></script>
+    <script type="text/javascript" src="Tonejs-Instruments.js"></script>
 
-    const x = a.x || 0;
-    const y = a.y || 0;
-    const z = a.z || 0;
-    const mag = Math.sqrt(x*x + y*y + z*z);
+    <script>
+        NProgress.start();
+        // load samples //
 
-    motionBuffer.push(mag);
-    if (motionBuffer.length > BUFFER_SIZE) motionBuffer.shift();
+        var samples = SampleLibrary.load({
+            instruments: ['piano', 'bass-electric', 'bassoon', 'cello', 'clarinet', 'contrabass', 'flute', 'french-horn', 'guitar-acoustic', 'guitar-electric','guitar-nylon', 'harmonium', 'harp', 'organ', 'saxophone', 'trombone', 'trumpet', 'tuba', 'violin', 'xylophone'],
+            baseUrl: "samples/"
+        })
 
-    if (motionBuffer.length < 5) return;
 
-    const mean = motionBuffer.reduce((s,v)=>s+v,0) / motionBuffer.length;
-    const variance = motionBuffer.reduce((s,v)=>s+(v-mean)**2,0) / motionBuffer.length;
-    const stdDev = Math.sqrt(variance);
+        // show keyboard on load //
+        var current
 
-    let rawActivity = Math.min(stdDev / 4.0, 1.0);
-    instantMotion = rawActivity;
-    smoothedMotion = smoothedMotion * 0.9 + instantMotion * 0.1;
 
-    // 風切りヒューを振ったときに発生させる
-    if (instantMotion > 0.15) { // ★しっかり振ったときに発動
-        const hueFreq = 1200 + Math.random()*3000; // 1.2kHz 〜 4.2kHz くらいにランダム
-        windFilter.frequency.setValueAtTime(hueFreq, Tone.now());
-        windSynth.triggerAttackRelease("8n"); // ★振るたびに「ヒュー」
-    }
+        Tone.Buffer.on('load', function() {
+            document.querySelector(".container").style.display = 'block';
+            document.querySelector("#loading").style.display = 'none';
+            NProgress.done();
 
-}
-
-// ============================================================
-// 6. 描画 & パラメータ更新
-// ============================================================
-function updateLoop() {
-    if (!isPlaying) return;
-
-    // BPM Mapping
-    const minBpm = 100;
-    const maxBpm = 150;
-    let targetBpm = minBpm + (smoothedMotion * (maxBpm - minBpm));
-    Tone.Transport.bpm.rampTo(targetBpm, 0.2);
-
-    // Wind Control (Softer)
-    // 音量: ピンクノイズなので少し大きめにしても耳に痛くない
-    let windVol = -50 + (instantMotion * 40);
-    if (instantMotion < 0.05) windVol = -100;
-    windSynth.volume.rampTo(windVol, 0.2); // 少し反応をなめらかに
-    
-    // Filter Control: 
-    // ピンクノイズをローパスフィルターで制御し、強く振ると高域が出るようにするが、上限を抑える
-    let windFreq = 400 + (instantMotion * 2000); // MAX 2400Hz程度に抑える（以前は4000Hz超）
-    windFilter.frequency.rampTo(windFreq, 0.2);
-
-    // UI
-    document.getElementById("bpmVal").textContent = Math.round(Tone.Transport.bpm.value);
-    
-    const modeDiv = document.getElementById("mode-display");
-    if (smoothedMotion > 0.6) {
-        modeDiv.textContent = "Active (High Energy)";
-        modeDiv.style.color = "#ff8888";
-    } else {
-        modeDiv.textContent = "Calm (Routine)";
-        modeDiv.style.color = "#6a85b6";
-    }
-
-    const wPercent = Math.min(100, instantMotion * 100);
-    document.getElementById("wind-bar").style.width = wPercent + "%";
-
-    requestAnimationFrame(updateLoop);
-}
-
-// ============================================================
-// 7. 初期化
-// ============================================================
-document.getElementById("startBtn").addEventListener("click", async () => {
-    if (isPlaying) return;
-
-    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
-        try {
-            const res = await DeviceMotionEvent.requestPermission();
-            if (res !== "granted") {
-                alert("Permission denied");
-                return;
+            // loop through instruments and set release, connect to master output
+            for (var property in samples) {
+                if (samples.hasOwnProperty(property)) {
+                    console.log(samples[property])
+                    samples[property].release = .5;
+                    samples[property].toMaster();
+                }
             }
-        } catch (e) { console.error(e); }
-    }
-    window.addEventListener("devicemotion", handleMotion);
 
-    await Tone.start();
-    setupSynths();
-    
-    isPlaying = true;
-    startMusicLoop();
-    updateLoop();
+            current = samples['piano'];
 
-    document.getElementById("startBtn").style.display = "none";
-});
-</script>
+            select.on('change', function(v) {
+                current = samples[v.value];
+            })
+
+
+        })
+
+        Tone.Buffer.on('error', function() {
+            document.querySelector("#loading").innerHTML = "I'm sorry, there has been an error loading the samples. This demo works best on on the most up-to-date version of Chrome.";
+        })
+
+
+
+
+        // create Nexus UI //
+        Nexus.colors.accent = "#f00"
+
+        var select = new Nexus.Select('#Selector', {
+            'size': [300, 30],
+            'options': Object.keys(samples)
+        });
+
+        var keyboardUI = new Nexus.Piano('#Keyboard', {
+            'size': [1000, 125],
+            'mode': 'button', // 'button', 'toggle', or 'impulse'
+            'lowNote': 36,
+            'highNote': 72
+        })
+
+
+        keyboardUI.on('change', function(note) {
+            console.log(Tone.Frequency(note.note, "midi").toNote());
+            if (note.state === true) {
+                current.triggerAttack(Tone.Frequency(note.note, "midi").toNote());
+            } else if (note.state === false) {
+                current.triggerRelease(Tone.Frequency(note.note, "midi").toNote());
+            }
+        })
+
+    </script>
+
 </body>
+
 </html>
