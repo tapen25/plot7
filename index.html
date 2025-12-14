@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Motion → BPM → Tone.js</title>
+<title>Motion BPM → AB Loop Synth</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
@@ -11,83 +11,69 @@
   body {
     font-family: sans-serif;
     text-align: center;
-    background: #f2f2f2;
     padding: 20px;
+    background: #f0f0f0;
   }
   button {
     font-size: 1.2rem;
-    padding: 15px 30px;
+    padding: 12px 30px;
   }
-  .info {
-    margin-top: 20px;
+  #status, #debug {
+    margin-top: 10px;
     font-size: 1rem;
   }
 </style>
 </head>
 
 <body>
-<h2>Walking Music Interaction</h2>
-<button id="startBtn">Start (iOS用)</button>
 
-<div class="info">
-  <div id="activity">Activity: 0</div>
-  <div id="bpm">BPM: 100</div>
-  <div id="mode">Mode: calm</div>
-</div>
+<button id="start">Start（iOSは要タップ）</button>
+<div id="status">停止中</div>
+<div id="debug">BPM: 0</div>
 
 <script>
-/* ===============================
-   加速度処理
-================================ */
-let accelHistory = [];
-const WINDOW_SIZE = 20;
+// =========================
+// 状態管理
+// =========================
+let isPlaying = false;
+let currentNoteIndex = 0;
+let usePatternA = true;
+let smoothedBPM = 80;
 
-function calcStdDev(values) {
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance =
-    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
-  return Math.sqrt(variance);
-}
+// 加速度履歴
+let motionHistory = [];
+const HISTORY_DURATION = 2000;
 
-function getActivity() {
-  if (accelHistory.length < WINDOW_SIZE) return 0;
-  return calcStdDev(accelHistory);
-}
+// =========================
+// パターン定義
+// =========================
+const patterns = {
+  A: ["D4","C4","B3","D4","C4","A3","G3","A3","B3"],
+  B: ["D4","C4","B3","D4","C4","A3","G3","B3","G3"]
+};
 
-/* ===============================
-   Activity → BPM
-================================ */
-function activityToBPM(activity) {
-  const minA = 0.5;
-  const maxA = 3.0;
-  const clamped = Math.max(minA, Math.min(maxA, activity));
-  const norm = (clamped - minA) / (maxA - minA);
-  return 100 + norm * 20;
-}
+const durations = [0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,1.0];
 
-/* ===============================
-   Tone.js
-================================ */
-let synth = null;
-let currentMode = "";
-const loop = new Tone.Loop(time => {
-  synth?.triggerAttackRelease("D4", "8n", time);
-}, "4n");
+// =========================
+// BPM → synth 切り替え
+// =========================
+let currentSynth = null;
+let currentSynthType = null;
 
-function setSynthByBPM(bpm) {
-  let mode = "";
+function getSynthByBPM(bpm) {
+  let type;
+  if (bpm >= 100 && bpm < 110) type = "soft";
+  else if (bpm < 120) type = "fm";
+  else type = "mono";
 
-  if (bpm < 110) mode = "calm";
-  else if (bpm < 120) mode = "active";
-  else mode = "energetic";
+  if (currentSynth && currentSynthType === type) {
+    return currentSynth;
+  }
 
-  if (mode === currentMode) return;
-  currentMode = mode;
+  if (currentSynth) currentSynth.dispose();
 
-  if (synth) synth.dispose();
-
-  if (mode === "calm") {
-    synth = new Tone.PolySynth(Tone.Synth, {
+  if (type === "soft") {
+    currentSynth = new Tone.PolySynth(Tone.Synth, {
       volume: 0,
       oscillator: { type: "triangle" },
       envelope: {
@@ -99,8 +85,8 @@ function setSynthByBPM(bpm) {
     }).toDestination();
   }
 
-  if (mode === "active") {
-    synth = new Tone.FMSynth({
+  if (type === "fm") {
+    currentSynth = new Tone.FMSynth({
       volume: 0,
       harmonicity: 3,
       modulationIndex: 12.22,
@@ -120,8 +106,8 @@ function setSynthByBPM(bpm) {
     }).toDestination();
   }
 
-  if (mode === "energetic") {
-    synth = new Tone.PolySynth(Tone.MonoSynth, {
+  if (type === "mono") {
+    currentSynth = new Tone.PolySynth(Tone.MonoSynth, {
       volume: -8,
       oscillator: { type: "square8" },
       filter: {
@@ -146,60 +132,94 @@ function setSynthByBPM(bpm) {
     }).toDestination();
   }
 
-  document.getElementById("mode").innerText = "Mode: " + mode;
+  currentSynthType = type;
+  return currentSynth;
 }
 
-/* ===============================
-   iOS 13+ permission
-================================ */
-async function startMotion() {
-  await Tone.start();
+// =========================
+// センサー処理
+// =========================
+function handleMotion(e) {
+  const acc = e.accelerationIncludingGravity;
+  if (!acc) return;
 
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
-    const permission = await DeviceMotionEvent.requestPermission();
-    if (permission !== "granted") {
-      alert("Motion permission denied");
-      return;
-    }
+  const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+  const now = performance.now();
+
+  motionHistory.push({ time: now, val: mag });
+  motionHistory = motionHistory.filter(d => now - d.time < HISTORY_DURATION);
+
+  const avg =
+    motionHistory.reduce((s, d) => s + d.val, 0) /
+    (motionHistory.length || 1);
+
+  smoothedBPM = mapAccelToBPM(avg);
+
+  document.getElementById("debug").innerText =
+    `BPM: ${Math.floor(smoothedBPM)}`;
+
+  if (!isPlaying && mag > 15) {
+    startSequence();
+  }
+}
+
+function mapAccelToBPM(a) {
+  let bpm = 100 + (a - 10) * 8;
+  return Math.max(60, Math.min(200, bpm));
+}
+
+// =========================
+// シーケンス制御
+// =========================
+function startSequence() {
+  isPlaying = true;
+  currentNoteIndex = 0;
+  playNextNote();
+}
+
+function playNextNote() {
+  const pattern = usePatternA ? patterns.A : patterns.B;
+
+  if (currentNoteIndex >= pattern.length) {
+    // ★ ABをループ
+    usePatternA = !usePatternA;
+    currentNoteIndex = 0;
   }
 
-  window.addEventListener("devicemotion", e => {
-    const a = e.accelerationIncludingGravity;
-    if (!a) return;
+  const note = pattern[currentNoteIndex];
+  const dur = durations[currentNoteIndex];
+  const beat = 60 / smoothedBPM;
+  const timeLen = beat * dur;
 
-    const mag = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
-    accelHistory.push(mag);
-    if (accelHistory.length > WINDOW_SIZE) accelHistory.shift();
-  });
+  const synth = getSynthByBPM(smoothedBPM);
 
-  Tone.Transport.start();
-  loop.start(0);
+  synth.triggerAttackRelease(
+    note,
+    timeLen * 0.9,
+    Tone.now()
+  );
 
-  updateLoop();
+  document.getElementById("status").innerText =
+    `再生中: ${usePatternA ? "A" : "B"} ${currentNoteIndex+1}`;
+
+  currentNoteIndex++;
+  setTimeout(playNextNote, timeLen * 1000);
 }
 
-/* ===============================
-   更新ループ
-================================ */
-function updateLoop() {
-  const activity = getActivity();
-  const bpm = activityToBPM(activity);
+// =========================
+// スタート処理
+// =========================
+document.getElementById("start").onclick = async () => {
+  await Tone.start();
 
-  Tone.Transport.bpm.rampTo(bpm, 0.5);
-  setSynthByBPM(bpm);
+  if (typeof DeviceMotionEvent?.requestPermission === "function") {
+    await DeviceMotionEvent.requestPermission();
+  }
 
-  document.getElementById("activity").innerText =
-    "Activity: " + activity.toFixed(2);
-  document.getElementById("bpm").innerText =
-    "BPM: " + bpm.toFixed(1);
-
-  requestAnimationFrame(updateLoop);
-}
-
-document.getElementById("startBtn").addEventListener("click", startMotion);
+  window.addEventListener("devicemotion", handleMotion);
+  document.getElementById("status").innerText = "待機中…";
+};
 </script>
+
 </body>
 </html>
