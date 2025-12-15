@@ -173,10 +173,10 @@ function updateFilterAndVol(std) {
   globalFilter.frequency.rampTo(targetFreq, RAMP_TIME);
 
   // 2. キック音量
-  let kickVol = -100; 
+  let kickVol = -90; 
   if (std > 2.0) {
-    kickVol = -30 + (std - 2) * 4; 
-    if (kickVol > -15) kickVol = -15; 
+    kickVol = -20 + (std - 2) * 4; 
+    if (kickVol > -5) kickVol = -5; 
   }
   kickSynth.volume.rampTo(kickVol, RAMP_TIME);
 
