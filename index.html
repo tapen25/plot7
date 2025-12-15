@@ -140,6 +140,8 @@ function mapAccelToBPM(a) {
 // フィルター制御関数
 function updateFilter(magnitude) {
   // ...existing code...
+  const minFreq = 200;  // 完全にこもった音
+  const maxFreq = 3000; // 明るく開いた音
   let targetFreq = 200 + (magnitude - 10) * 150;
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
