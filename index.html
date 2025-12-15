@@ -218,7 +218,7 @@ function playNextNote() {
 
   // 2. キック (フィルターを通すため音階は低めの固定値 C1)
   if (kickIndices.includes(currentNoteIndex)) {
-    kickSynth.triggerAttackRelease("C1", "8n");
+    kickSynth.triggerAttackRelease("C3", "8n");
   }
 
   // 3. ★ベース (定義したマップに従ってC-E-G-C)
