@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Filter Synth</title>
+<title>Motion Filter Synth (Instant Trigger)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -23,28 +23,17 @@
 // ==========================================
 // 1. エフェクトとシンセの定義
 // ==========================================
-
-// ★ここが重要: 独立したフィルターを作る
-// frequency: 初期値は 200Hz (かなりこもった音)
 const globalFilter = new Tone.Filter({
   type: "lowpass",
   frequency: 200, 
-  Q: 1 // レゾナンス（少しクセをつける）
+  Q: 1 
 }).toDestination();
 
-// PolySynthをフィルターに接続 (.connect(globalFilter))
 const polySynth = new Tone.PolySynth(Tone.Synth, {
-  oscillator: { 
-    type: "sawtooth" // ★重要: フィルターの効きが良いノコギリ波
-  },
-  envelope: { 
-    attack: 0.1, 
-    decay: 0.2, 
-    sustain: 0.5, 
-    release: 1 
-  },
+  oscillator: { type: "sawtooth" },
+  envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 },
   volume: -5
-}).connect(globalFilter); // 出力先をフィルターへ
+}).connect(globalFilter);
 
 // ==========================================
 // 変数・設定
@@ -55,14 +44,15 @@ let currentNoteIndex = 0;
 let smoothedBPM = 60; 
 
 let motionHistory = [];
-const HISTORY_DURATION = 4000; 
+// ★変更点1: 履歴を少し短くして、フィルターの追従性を上げました（4秒→2秒）
+const HISTORY_DURATION = 2000; 
 
 const patterns = {
-  A: ["G4","E4","C3","D4", "C4","D3", "G3","A3", "E4"],
-  B: ["D4","C4","B3","D4", "C4","A3", "G3","B3", "G3"]
+  A: ["C4","E4","G4","A4", "G4","D4", "G4","F4", "E4"],
+  B: ["G4","E4","D4","C4", "D4","C4", "D4","E4", "C4"]
 };
 
-const durations = [0.25, 0.25, 0.5, 0.5, 0.25, 0.25, 0.5, 0.5, 1.0];
+const durations = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 1.0];
 
 function noteToFreq(note) {
   const map = {
@@ -74,9 +64,6 @@ function noteToFreq(note) {
   return 440 * Math.pow(2, semitone/12);
 }
 
-// ==========================================
-// 開始処理
-// ==========================================
 document.getElementById("start").onclick = async () => {
   if (typeof DeviceMotionEvent.requestPermission === 'function') {
     try {
@@ -84,13 +71,13 @@ document.getElementById("start").onclick = async () => {
       if (permissionState !== 'granted') return alert("拒否されました");
     } catch (e) { console.error(e); }
   }
-
   await Tone.start();
   window.addEventListener("devicemotion", handleMotion);
   document.getElementById("status").innerText = "振ってフィルターを開放してください";
   document.getElementById("start").style.display = "none";
   document.body.classList.add("active");
 };
+
 function computeMeanStd(arr) {
   const n = arr.length;
   if (n === 0) return { mean: 0, std: 0 };
@@ -99,6 +86,7 @@ function computeMeanStd(arr) {
   const std = Math.sqrt(varSum);
   return { mean, std };
 }
+
 // ==========================================
 // センサー処理 & フィルター制御
 // ==========================================
@@ -106,26 +94,29 @@ function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
 
+  // mag は「今この瞬間」の揺れ
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
   const now = performance.now();
 
   motionHistory.push({ time: now, val: mag });
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
-  // --- 新: 過去履歴から平均と標準偏差を得る ---
-  const values = motionHistory.map(item => item.val);
-  const stats = computeMeanStd(values);
-  const meanMag = stats.mean;
-  const sdMag = stats.std;
+  const stats = computeMeanStd(motionHistory.map(item => item.val));
+  const meanMag = stats.mean; // 平均（じんわり変化）
+  
+  // BPMは平均値から算出（安定させるため）
   const rawBPMFromMean = mapAccelToBPM(meanMag);
-  const alpha = 0.25; // EMAの追従速度。小さくするとより滑らか
+  const alpha = 0.25; 
   smoothedBPM = smoothedBPM === 0 ? rawBPMFromMean : (alpha * rawBPMFromMean + (1 - alpha) * smoothedBPM);
 
-  // フィルターを平均値に基づいて更新（瞬間値ではなく平均に従う）
+  // フィルターは平均値で制御（音色を滑らかに変えるため）
   updateFilter(meanMag);
 
-  // 再生開始判定も平均値を使う（短時間ノイズで誤って開始しにくい）
-  if (!isPlaying && meanMag > 12) {
+  // ★変更点2: 再生トリガー判定
+  // 平均(meanMag)ではなく、瞬間値(mag)で判定します。
+  // これにより、止まっている状態からの一歩目(ドンッ)で即座に反応します。
+  // 閾値を 12 程度に設定（重力9.8 + 軽い動作分）
+  if (!isPlaying && mag > 12.5) {
     startSequence();
   }
 }
@@ -137,18 +128,15 @@ function mapAccelToBPM(a) {
   return bpm;
 }
 
-// フィルター制御関数
 function updateFilter(magnitude) {
-  // ...existing code...
-  const minFreq = 200;  // 完全にこもった音
-  const maxFreq = 3000; // 明るく開いた音
-  let targetFreq = 200 + (magnitude - 10) * 150;
+  const minFreq = 200;  
+  const maxFreq = 3000; 
+  // フィルターの開き具合も少し敏感に調整
+  let targetFreq = 200 + (magnitude - 9.8) * 200; 
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
   globalFilter.frequency.rampTo(targetFreq, 0.1);
 
-  // デバッグ表示に平均と標準偏差（sd）はhandleMotionで計算しているので
-  // smoothedBPM と合わせて表示
   document.getElementById("debug").innerText =
     `Filter: ${Math.floor(targetFreq)}Hz (BPM: ${Math.floor(smoothedBPM)})`;
 }
@@ -173,14 +161,10 @@ function playNextNote() {
   const noteName = currentPattern[currentNoteIndex];
   const durationVal = durations[currentNoteIndex];
   
-  // テンポ計算
   const beatDuration = 60 / smoothedBPM; 
   const noteTimeLen = beatDuration * durationVal;
   
-  // ★転調（pitchOffset）は削除しました
   const freq = noteToFreq(noteName);
-
-  // 音を鳴らす（PolySynth固定）
   polySynth.triggerAttackRelease(freq, noteTimeLen);
 
   document.getElementById("status").innerText = 
@@ -196,7 +180,6 @@ function finishSequence() {
   isPlaying = false;
   usePatternA = !usePatternA; 
   document.getElementById("status").innerText = "待機中...";
-  // 演奏が終わったら少しフィルターを閉じる演出
   globalFilter.frequency.rampTo(200, 2);
 }
 </script>
