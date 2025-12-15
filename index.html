@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fixed Drum Volume</title>
+<title>Filtered Kick & Bass C-E-G-C</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -24,31 +24,35 @@
 // 1. シンセ定義
 // ==========================================
 
+// --- 共通フィルター (メロディもキックもここを通る) ---
 const globalFilter = new Tone.Filter({
   type: "lowpass",
   frequency: 200, 
   Q: 1 
 }).toDestination();
 
+// --- メインメロディ ---
 const polySynth = new Tone.PolySynth(Tone.Synth, {
   oscillator: { type: "sawtooth" },
   envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 },
   volume: -5
 }).connect(globalFilter);
 
-// --- キック (音量設定を見直し) ---
+// --- ★変更: キック (メロディと同じSawtoothで、同じフィルターを通す) ---
+// これにより、振っていない時は「ドムドム(こもる)」、振ると「バッバッ(明るい)」になります
 const kickSynth = new Tone.MonoSynth({
   oscillator: { type: "sawtooth" }, 
-  envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.2 },
-  volume: -100 // 初期値は無音
-}).connect(globalFilter);
+  envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.2 }, // 短く歯切れよく
+  volume: -100 
+}).connect(globalFilter); // ★重要: フィルターに接続
 
+// --- ベース (柔らかい音) ---
 const bassSynth = new Tone.MonoSynth({
   oscillator: { type: "triangle" }, 
   envelope: { attack: 0.1, decay: 0.5, sustain: 0.8, release: 1 }, 
   filterEnvelope: { attack: 0.1, baseFrequency: 200, octaves: 1, exponent: 2 },
   volume: -100 
-}).toDestination();
+}).toDestination(); // ベースは低音を支えるためフィルターを通さずそのまま出力
 
 // ==========================================
 // 変数・設定
@@ -68,14 +72,19 @@ const patterns = {
   A: ["C4","E4","G4","A4", "G4","A4", "G4","F4", "E4"],
   B: ["G4","E4","D4","C4", "D4","C4", "D4","E4", "C4"]
 };
+
 const durations = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 1.0];
+
+// キックのタイミング（インデックス）
 const kickIndices = [0, 2, 4, 8]; 
 
+// ★変更: ベースの進行定義 (C -> E -> G -> C)
+// インデックスと音程のマップ
 const bassMap = {
-  0: "C3", 
-  2: "E3", 
-  4: "G3", 
-  8: "C4"  
+  0: "C3", // 1拍目
+  2: "E3", // 2拍目
+  4: "G3", // 3拍目
+  8: "C4"  // 4拍目
 };
 
 function noteToFreq(note) {
@@ -113,11 +122,16 @@ function computeMeanStd(arr) {
   return { mean, std };
 }
 
+// ==========================================
+// センサー & パラメータ制御
+// ==========================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
+
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
   const now = performance.now();
+
   motionHistory.push({ time: now, val: mag });
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
@@ -138,11 +152,8 @@ function updateBPM() {
   const diff = targetBPM - currentBPM;
   const step = diff * 0.02; 
   currentBPM += step;
-  
-  // デバッグ表示にKickの現在の音量も出す
-  const kickVolDisp = Math.floor(kickSynth.volume.value);
   document.getElementById("debug").innerText =
-    `BPM: ${Math.floor(currentBPM)} / KickVol: ${kickVolDisp}dB`;
+    `Target: ${Math.floor(targetBPM)} / Cur: ${Math.floor(currentBPM)}`;
 }
 
 function mapStdToBPM(std) {
@@ -153,7 +164,7 @@ function mapStdToBPM(std) {
 }
 
 function updateFilterAndVol(std) {
-  // 1. フィルター
+  // 1. フィルター周波数 (メロディとキック両方に影響)
   const minFreq = 200;  
   const maxFreq = 800; 
   let targetFreq = 200 + (std * 50); 
@@ -161,13 +172,11 @@ function updateFilterAndVol(std) {
   if (targetFreq > maxFreq) targetFreq = maxFreq;
   globalFilter.frequency.rampTo(targetFreq, RAMP_TIME);
 
-  // 2. キック音量 (★ここを修正)
+  // 2. キック音量
   let kickVol = -100; 
-  // 閾値を 2.0 -> 0.5 に下げました（少しの揺れで鳴り始める）
-  if (std > 0.5) {
-    // -30dB(小) 〜 -5dB(大) の範囲で変化
-    kickVol = -30 + (std - 0.5) * 4; 
-    if (kickVol > -5) kickVol = -5; // 最大音量キャップ
+  if (std > 2.0) {
+    kickVol = -30 + (std - 2) * 4; 
+    if (kickVol > -15) kickVol = -15; 
   }
   kickSynth.volume.rampTo(kickVol, RAMP_TIME);
 
@@ -181,7 +190,7 @@ function updateFilterAndVol(std) {
 }
 
 // ==========================================
-// シーケンス
+// シーケンス制御
 // ==========================================
 function startSequence() {
   isPlaying = true;
@@ -191,26 +200,29 @@ function startSequence() {
 
 function playNextNote() {
   const currentPattern = usePatternA ? patterns.A : patterns.B;
+  
   if (currentNoteIndex >= currentPattern.length) {
     finishSequence();
     return;
   }
+
   const noteName = currentPattern[currentNoteIndex];
   const durationVal = durations[currentNoteIndex];
+  
   const beatDuration = 60 / currentBPM; 
   const noteTimeLen = beatDuration * durationVal;
   
-  // Melody
+  // 1. メインメロディ
   const freq = noteToFreq(noteName);
   polySynth.triggerAttackRelease(freq, noteTimeLen);
 
-  // Kick (★音程をC1 -> C2に変更)
+  // 2. キック (フィルターを通すため音階は低めの固定値 C1)
   if (kickIndices.includes(currentNoteIndex)) {
-    // C2 (約65Hz) ならスマホのスピーカーでも聞こえやすい
     kickSynth.triggerAttackRelease("C2", "8n");
   }
 
-  // Bass
+  // 3. ★ベース (定義したマップに従ってC-E-G-C)
+  // bassMap[currentNoteIndex] が存在する場合のみ鳴らす
   if (bassMap[currentNoteIndex]) {
     bassSynth.triggerAttackRelease(bassMap[currentNoteIndex], "2n");
   }
@@ -228,6 +240,7 @@ function finishSequence() {
   isPlaying = false;
   usePatternA = !usePatternA; 
   document.getElementById("status").innerText = "待機中...";
+  
   globalFilter.frequency.rampTo(200, 5);
   kickSynth.volume.rampTo(-100, 5);
   bassSynth.volume.rampTo(-100, 5);
