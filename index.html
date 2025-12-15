@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Layer Synth</title>
+<title>Slow Motion Synth (90-120)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -35,8 +35,6 @@ const polySynth = new Tone.PolySynth(Tone.Synth, {
   volume: -5
 }).connect(globalFilter);
 
-// ★追加: うっすら鳴るキック（ドラム）
-// 最初はボリュームを最小(-Infinity)にしておきます
 const kickSynth = new Tone.MembraneSynth({
   volume: -100 
 }).toDestination();
@@ -47,7 +45,9 @@ const kickSynth = new Tone.MembraneSynth({
 let usePatternA = true;
 let isPlaying = false; 
 let currentNoteIndex = 0; 
-let smoothedBPM = 100; 
+
+// ★変更点1: 初期BPMを90に設定
+let smoothedBPM = 90; 
 
 let motionHistory = [];
 const HISTORY_DURATION = 1500; 
@@ -57,12 +57,9 @@ const patterns = {
   B: ["G4","E4","D4","C4", "D4","C4", "D4","E4", "C4"]
 };
 
-// リズム譜（長さ）
-// 0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 1.0 (合計4拍)
-// キックを入れるタイミングは配列のインデックスで管理します
-// Index 0 (0.0拍目), Index 2 (1.0拍目), Index 4 (2.0拍目), Index 8 (3.0拍目)
+// リズム譜
 const durations = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 1.0];
-const kickIndices = [0, 2, 4, 8]; // キックを鳴らすタイミング
+const kickIndices = [0, 2, 4, 8]; 
 
 function noteToFreq(note) {
   const map = {
@@ -114,15 +111,15 @@ function handleMotion(e) {
   const intensity = stats.std; 
   const cleanIntensity = intensity < 0.8 ? 0 : intensity;
 
-  // BPM
+  // BPM計算
   const rawBPM = mapStdToBPM(cleanIntensity);
-  const alpha = 0.1; 
+  
+  // ★変更点2: alphaを0.03に設定（非常にゆっくり追従する）
+  // 値が小さいほど「じわじわ」変化します (0.01〜0.1の範囲推奨)
+  const alpha = 0.03; 
   smoothedBPM = smoothedBPM === 0 ? rawBPM : (alpha * rawBPM + (1 - alpha) * smoothedBPM);
 
-  // フィルター
   updateFilter(cleanIntensity);
-  
-  // ★ドラムレイヤーの音量制御
   updateLayerVolume(cleanIntensity);
 
   if (!isPlaying && mag > 13.0) {
@@ -130,43 +127,41 @@ function handleMotion(e) {
   }
 }
 
+// ★変更点3: 90〜120の範囲にマッピング
 function mapStdToBPM(std) {
-  let bpm = 100 + (std * 5); 
-  if (bpm < 100) bpm = 100;
-  if (bpm > 130) bpm = 130;
+  // 係数を 4 に設定。
+  // std=0 -> 90 BPM
+  // std=7.5 -> 120 BPM
+  let bpm = 90 + (std * 4); 
+  
+  if (bpm < 90) bpm = 90;
+  if (bpm > 120) bpm = 120;
   return bpm;
 }
 
 function updateFilter(std) {
-  // フィルター：ごく控えめな変化 (200Hz - 800Hz)
   const minFreq = 200;  
   const maxFreq = 800; 
   let targetFreq = 200 + (std * 50); 
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
-  globalFilter.frequency.rampTo(targetFreq, 0.2);
+  
+  // ★変更点4: 変化時間を1.0秒に設定
+  // これによりフィルターの開閉がよりぬるっとなります
+  globalFilter.frequency.rampTo(targetFreq, 1.0);
 }
 
-// ★ドラムの音量計算
 function updateLayerVolume(std) {
-  // stdが 2.0 を超えたあたりから鳴り始める
-  // 最大でも -20dB (かなり小さい音)
-  
-  let targetVol = -100; // 基本は無音
+  let targetVol = -100; 
 
   if (std > 2.0) {
-    // stdが上がると、-40dB から -20dB の間で推移
-    // マッピング: (std - 2) * 5  => std=6なら20加算 => -20dB
-    targetVol = -40 + (std - 2) * 5; 
-    
-    // 上限キャップ（うるさくならないように）
-    if (targetVol > -15) targetVol = -15; 
+    // キック音量も少し控えめに (-20dB上限)
+    targetVol = -40 + (std - 2) * 4; 
+    if (targetVol > -20) targetVol = -20; 
   }
+  // 音量変化もゆっくり (1秒)
+  kickSynth.volume.rampTo(targetVol, 1.0);
 
-  // 音量の変化をなめらかに適用
-  kickSynth.volume.rampTo(targetVol, 0.2);
-
-  // デバッグ表示更新
   const volStr = targetVol <= -90 ? "Off" : Math.floor(targetVol) + "dB";
   document.getElementById("debug").innerText =
     `Std: ${std.toFixed(1)} / BPM: ${Math.floor(smoothedBPM)} / Kick: ${volStr}`;
@@ -195,14 +190,10 @@ function playNextNote() {
   const beatDuration = 60 / smoothedBPM; 
   const noteTimeLen = beatDuration * durationVal;
   
-  // 1. メロディを鳴らす
   const freq = noteToFreq(noteName);
   polySynth.triggerAttackRelease(freq, noteTimeLen);
 
-  // 2. ★タイミングが合えばキックを鳴らす
-  // 音量は updateLayerVolume で常時制御されているため、ここではtriggerするだけでOK
   if (kickIndices.includes(currentNoteIndex)) {
-    // 音程C1, 長さ8分音符
     kickSynth.triggerAttackRelease("C1", "8n");
   }
 
@@ -220,7 +211,7 @@ function finishSequence() {
   usePatternA = !usePatternA; 
   document.getElementById("status").innerText = "待機中...";
   globalFilter.frequency.rampTo(200, 2);
-  kickSynth.volume.rampTo(-100, 2); // 終了時はキックもフェードアウト
+  kickSynth.volume.rampTo(-100, 2); 
 }
 </script>
 
