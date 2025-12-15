@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Filter Synth (BPM 100-130)</title>
+<title>Motion Synth (Std Dev Control)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -41,11 +41,11 @@ const polySynth = new Tone.PolySynth(Tone.Synth, {
 let usePatternA = true;
 let isPlaying = false; 
 let currentNoteIndex = 0; 
-// ★変更点A: 初期BPMを範囲の最小値に合わせて100に変更
-let smoothedBPM = 100; 
+let smoothedBPM = 100; // 初期BPM 100
 
 let motionHistory = [];
-const HISTORY_DURATION = 2000; 
+// 標準偏差をきれいに出すため、履歴を少し短く調整（直近の揺れを見る）
+const HISTORY_DURATION = 1500; 
 
 const patterns = {
   A: ["C4","E4","G4","A4", "G4","A4", "G4","F4", "E4"],
@@ -100,44 +100,56 @@ function handleMotion(e) {
   motionHistory.push({ time: now, val: mag });
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
+  // 統計量を計算（平均と標準偏差）
   const stats = computeMeanStd(motionHistory.map(item => item.val));
-  const meanMag = stats.mean; 
   
-  const rawBPMFromMean = mapAccelToBPM(meanMag);
-  const alpha = 0.25; 
-  smoothedBPM = smoothedBPM === 0 ? rawBPMFromMean : (alpha * rawBPMFromMean + (1 - alpha) * smoothedBPM);
+  // ★ここがポイント: 平均(mean)ではなく、標準偏差(std)を使います
+  // stdは「静止していればほぼ0」「揺らすと大きくなる」値です。重力の影響を受けません。
+  const intensity = stats.std; 
 
-  updateFilter(meanMag);
+  // ノイズゲート（微細な手の震えを無視）
+  const cleanIntensity = intensity < 0.8 ? 0 : intensity;
 
-  if (!isPlaying && mag > 12.5) {
+  // BPM計算 (標準偏差ベース)
+  const rawBPM = mapStdToBPM(cleanIntensity);
+  const alpha = 0.1; // 変化をさらになめらかに
+  smoothedBPM = smoothedBPM === 0 ? rawBPM : (alpha * rawBPM + (1 - alpha) * smoothedBPM);
+
+  // フィルター計算 (標準偏差ベース)
+  updateFilter(cleanIntensity);
+
+  // トリガー（再生開始）は引き続き「瞬間の衝撃」で判定
+  if (!isPlaying && mag > 13.0) {
     startSequence();
   }
 }
 
-// ★変更点B: BPM計算ロジックを100〜130の範囲に修正
-function mapAccelToBPM(a) {
-  // 静止時(a=10付近)に100スタートになるように調整
-  // 以前の90から100へベースアップ
-  let bpm = 100 + (a - 10) * 5; 
+// ★標準偏差(std)をBPM(100-130)に変換
+function mapStdToBPM(std) {
+  // stdが 0 のとき 100
+  // stdが 6 くらいのとき 130 (激しく振ったとき)
+  let bpm = 100 + (std * 5); 
   
-  // 下限を100に制限
   if (bpm < 100) bpm = 100;
-  // 上限を130に制限
   if (bpm > 130) bpm = 130;
-  
   return bpm;
 }
 
-function updateFilter(magnitude) {
+// ★標準偏差(std)をフィルター周波数に変換
+function updateFilter(std) {
   const minFreq = 200;  
-  const maxFreq = 3000; 
-  let targetFreq = 200 + (magnitude - 9.8) * 200; 
+  const maxFreq = 4000; // 少し上限を上げました（抜けを良くするため）
+  
+  // std * 400 なので、std=0で200Hz, std=5で2200Hz, std=10で4200Hz
+  let targetFreq = 200 + (std * 400); 
+
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
-  globalFilter.frequency.rampTo(targetFreq, 0.1);
+  
+  globalFilter.frequency.rampTo(targetFreq, 0.2);
 
   document.getElementById("debug").innerText =
-    `Filter: ${Math.floor(targetFreq)}Hz (BPM: ${Math.floor(smoothedBPM)})`;
+    `StdDev: ${std.toFixed(2)} / BPM: ${Math.floor(smoothedBPM)} / Freq: ${Math.floor(targetFreq)}`;
 }
 
 // ==========================================
