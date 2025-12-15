@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Filter Synth (Instant Trigger)</title>
+<title>Motion Filter Synth (BPM 100-130)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -41,14 +41,14 @@ const polySynth = new Tone.PolySynth(Tone.Synth, {
 let usePatternA = true;
 let isPlaying = false; 
 let currentNoteIndex = 0; 
-let smoothedBPM = 60; 
+// ★変更点A: 初期BPMを範囲の最小値に合わせて100に変更
+let smoothedBPM = 100; 
 
 let motionHistory = [];
-// ★変更点1: 履歴を少し短くして、フィルターの追従性を上げました（4秒→2秒）
 const HISTORY_DURATION = 2000; 
 
 const patterns = {
-  A: ["C4","E4","G4","A4", "G4","D4", "G4","F4", "E4"],
+  A: ["C4","E4","G4","A4", "G4","A4", "G4","F4", "E4"],
   B: ["G4","E4","D4","C4", "D4","C4", "D4","E4", "C4"]
 };
 
@@ -94,7 +94,6 @@ function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
 
-  // mag は「今この瞬間」の揺れ
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
   const now = performance.now();
 
@@ -102,36 +101,36 @@ function handleMotion(e) {
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
   const stats = computeMeanStd(motionHistory.map(item => item.val));
-  const meanMag = stats.mean; // 平均（じんわり変化）
+  const meanMag = stats.mean; 
   
-  // BPMは平均値から算出（安定させるため）
   const rawBPMFromMean = mapAccelToBPM(meanMag);
   const alpha = 0.25; 
   smoothedBPM = smoothedBPM === 0 ? rawBPMFromMean : (alpha * rawBPMFromMean + (1 - alpha) * smoothedBPM);
 
-  // フィルターは平均値で制御（音色を滑らかに変えるため）
   updateFilter(meanMag);
 
-  // ★変更点2: 再生トリガー判定
-  // 平均(meanMag)ではなく、瞬間値(mag)で判定します。
-  // これにより、止まっている状態からの一歩目(ドンッ)で即座に反応します。
-  // 閾値を 12 程度に設定（重力9.8 + 軽い動作分）
   if (!isPlaying && mag > 12.5) {
     startSequence();
   }
 }
 
+// ★変更点B: BPM計算ロジックを100〜130の範囲に修正
 function mapAccelToBPM(a) {
-  let bpm = 90 + (a - 10) * 5; 
-  if (bpm < 60) bpm = 60;
-  if (bpm > 180) bpm = 180;
+  // 静止時(a=10付近)に100スタートになるように調整
+  // 以前の90から100へベースアップ
+  let bpm = 100 + (a - 10) * 5; 
+  
+  // 下限を100に制限
+  if (bpm < 100) bpm = 100;
+  // 上限を130に制限
+  if (bpm > 130) bpm = 130;
+  
   return bpm;
 }
 
 function updateFilter(magnitude) {
   const minFreq = 200;  
   const maxFreq = 3000; 
-  // フィルターの開き具合も少し敏感に調整
   let targetFreq = 200 + (magnitude - 9.8) * 200; 
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
