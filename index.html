@@ -22,26 +22,32 @@
 // ==========================================
 // Tone.js シンセサイザー定義
 // ==========================================
+// 1. こもる（PolySynth）
+// 単なるSynthだと明るすぎる場合があるので、高音を少し削る設定にするとなお良し
 const polySynth = new Tone.PolySynth(Tone.Synth, {
-  oscillator: { type: "triangle" },
-  envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 1 }
+  oscillator: { type: "sine" }, // 三角波よりさらに丸いサイン波に変更
+  envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 }
 }).toDestination();
 
-const fmSynth = new Tone.FMSynth({
-  harmonicity: 3,
-  modulationIndex: 10,
-  oscillator: { type: "sine" },
-  envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.5 },
-  modulation: { type: "square" },
-  volume: -5
-}).toDestination();
-
+// 2. 盛り上がり中間（MonoSynth）
+// ノコギリ波(sawtooth)にして、少しフィルターを開き気味に
 const monoSynth = new Tone.MonoSynth({
-  oscillator: { type: "square" },
-  filter: { Q: 6, type: "lowpass", rollover: -12 },
-  envelope: { attack: 0.005, decay: 0.1, sustain: 0.9, release: 1 },
-  filterEnvelope: { attack: 0.06, decay: 0.2, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 7, exponent: 2 },
-  volume: -6
+  oscillator: { type: "sawtooth" },
+  filter: { Q: 2, type: "lowpass", rollover: -12, frequency: 800 }, // ほどよい太さ
+  envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 1 },
+  filterEnvelope: { attack: 0.01, decay: 0.5, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 4 },
+  volume: -4
+}).toDestination();
+
+// 3. 最大開放（FMSynth）
+// ModulationIndexを高めにしてギラギラさせる
+const fmSynth = new Tone.FMSynth({
+  harmonicity: 1.5, // 倍音の比率を変えてより金属的に
+  modulationIndex: 15, // 数値を上げるとより明るく歪む
+  oscillator: { type: "sine" },
+  modulation: { type: "sawtooth" }, // 変調側をノコギリ波にして激しく
+  envelope: { attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.5 }, // サスティン高めで音を残す
+  volume: -4
 }).toDestination();
 
 // ==========================================
@@ -178,12 +184,18 @@ function playNextNote() {
 
 function playSoundWithTone(freq, duration, isHighSpeed) {
   let synthToUse;
-  if (isHighSpeed) {
-    synthToUse = monoSynth;
-  } else if (usePatternA) {
-    synthToUse = polySynth;
+
+  // BPMに応じて3段階に切り替えるロジック
+  // 60〜100: Poly (こもる)
+  // 100〜140: Mono (太くなる)
+  // 140以上 : FM (派手に開ける)
+
+  if (smoothedBPM < 100) {
+    synthToUse = polySynth;      // 第一形態：静か
+  } else if (smoothedBPM < 140) {
+    synthToUse = monoSynth;      // 第二形態：力強い
   } else {
-    synthToUse = fmSynth;
+    synthToUse = fmSynth;        // 最終形態：覚醒
   }
   synthToUse.triggerAttackRelease(freq, duration);
 }
