@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Synth – Discrete BPM</title>
+<title>Motion Synth with Tone.js (StdDev)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; }
-  button { padding: 15px 30px; font-size: 1.2em; }
-  #status, #debug { margin: 15px 0; }
+  button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; }
+  #status, #debug { margin: 15px 0; font-size: 1.1em; }
   #debug { color: #666; font-size: 0.9em; }
 </style>
 </head>
@@ -16,12 +16,12 @@
 
 <button id="start">Start (iOSは要タップ)</button>
 <div id="status">停止中</div>
-<div id="debug">avgMag: 0 / BPM: 100</div>
+<div id="debug">std: 0 / BPM: 100</div>
 
 <script>
-// ===============================
-// Tone.js Synth 定義
-// ===============================
+// ==========================================
+// Tone.js シンセ定義
+// ==========================================
 const polySynth = new Tone.PolySynth(Tone.Synth, {
   oscillator: { type: "triangle" },
   envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 1 }
@@ -43,9 +43,9 @@ const monoSynth = new Tone.MonoSynth({
   filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 6 }
 }).toDestination();
 
-// ===============================
+// ==========================================
 // 音楽データ
-// ===============================
+// ==========================================
 const patterns = {
   A: ["D4","C4","B3","D4","C4","A3","G3","A3","B3"],
   B: ["D4","C4","B3","D4","C4","A3","G3","B3","G3"]
@@ -53,94 +53,74 @@ const patterns = {
 
 const durations = [0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,1.0];
 
-// ===============================
+// ==========================================
 // 状態変数
-// ===============================
+// ==========================================
 let usePatternA = true;
 let isPlaying = false;
 let noteIndex = 0;
 
 let motionHistory = [];
-const HISTORY_DURATION = 2000;
-
-// ===============================
-// BPM 段階設計（100–120）
-// ===============================
-const bpmLevels = [
-  { min: -Infinity, max: 9.5, bpm: 100 },
-  { min: 9.5, max: 10.5, bpm: 105 },
-  { min: 10.5, max: 11.5, bpm: 110 },
-  { min: 11.5, max: 12.5, bpm: 115 },
-  { min: 12.5, max: Infinity, bpm: 120 }
-];
+const HISTORY_DURATION = 2000; // ms
 
 let currentBPM = 100;
-let bpmCandidate = 100;
-let bpmChangeTime = 0;
-const BPM_HOLD_TIME = 1000;
 
-Tone.Transport.bpm.value = currentBPM;
-
-// ===============================
+// ==========================================
 // Start
-// ===============================
+// ==========================================
 document.getElementById("start").onclick = async () => {
   await Tone.start();
   if (typeof DeviceMotionEvent?.requestPermission === "function") {
     await DeviceMotionEvent.requestPermission();
   }
   window.addEventListener("devicemotion", handleMotion);
-  document.getElementById("status").innerText = "センサー待機中";
+  document.getElementById("status").innerText = "センサー待機中...";
   document.getElementById("start").style.display = "none";
 };
 
-// ===============================
-// センサー処理
-// ===============================
+// ==========================================
+// センサー処理（標準偏差）
+// ==========================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
 
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-  const now = performance.now();
+  const motion = Math.abs(mag - 9.8); // 重力除去
 
-  motionHistory.push({ time: now, val: mag });
+  const now = performance.now();
+  motionHistory.push({ time: now, val: motion });
   motionHistory = motionHistory.filter(d => now - d.time < HISTORY_DURATION);
 
-  const avgMag = motionHistory.reduce((s,d)=>s+d.val,0) / motionHistory.length;
-  updateBPM(avgMag);
+  if (motionHistory.length < 5) return;
+
+  // --- 標準偏差 ---
+  const mean = motionHistory.reduce((s,d)=>s+d.val,0) / motionHistory.length;
+  const variance = motionHistory.reduce((s,d)=>s+(d.val-mean)**2,0) / motionHistory.length;
+  const std = Math.sqrt(variance);
+
+  currentBPM = stdToBPM(std);
 
   document.getElementById("debug").innerText =
-    `avgMag: ${avgMag.toFixed(2)} / BPM: ${currentBPM}`;
+    `std: ${std.toFixed(3)} / BPM: ${currentBPM}`;
 
-  if (!isPlaying && mag > 15) startSequence();
+  if (!isPlaying && std > 0.15) startSequence();
 }
 
-// ===============================
-// avgMag → BPM（段階）
-// ===============================
-function accelToBPM(avgMag) {
-  return bpmLevels.find(l => avgMag >= l.min && avgMag < l.max).bpm;
+// ==========================================
+// 標準偏差 → 段階BPM (100–120)
+// ==========================================
+function stdToBPM(std) {
+  if (std < 0.05) return 100;
+  if (std < 0.10) return 105;
+  if (std < 0.15) return 110;
+  if (std < 0.20) return 115;
+  return 120;
 }
 
-function updateBPM(avgMag) {
-  const now = performance.now();
-  const newBPM = accelToBPM(avgMag);
-
-  if (newBPM !== bpmCandidate) {
-    bpmCandidate = newBPM;
-    bpmChangeTime = now;
-  }
-
-  if (newBPM !== currentBPM && now - bpmChangeTime > BPM_HOLD_TIME) {
-    currentBPM = newBPM;
-    Tone.Transport.bpm.rampTo(currentBPM, 0.5);
-  }
-}
-
-// ===============================
+// ==========================================
 // シーケンス制御
-// ===============================
+// ==========================================
 function startSequence() {
   isPlaying = true;
   noteIndex = 0;
