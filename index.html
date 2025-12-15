@@ -55,14 +55,14 @@ let currentNoteIndex = 0;
 let smoothedBPM = 60; 
 
 let motionHistory = [];
-const HISTORY_DURATION = 2000; 
+const HISTORY_DURATION = 4000; 
 
 const patterns = {
-  A: ["D4","C4","B3","D4", "C4","A3", "G3","A3", "B3"],
+  A: ["G4","E4","C3","D4", "C4","D3", "G3","A3", "E4"],
   B: ["D4","C4","B3","D4", "C4","A3", "G3","B3", "G3"]
 };
 
-const durations = [0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 1.0];
+const durations = [0.25, 0.25, 0.5, 0.5, 0.25, 0.25, 0.5, 0.5, 1.0];
 
 function noteToFreq(note) {
   const map = {
@@ -91,7 +91,14 @@ document.getElementById("start").onclick = async () => {
   document.getElementById("start").style.display = "none";
   document.body.classList.add("active");
 };
-
+function computeMeanStd(arr) {
+  const n = arr.length;
+  if (n === 0) return { mean: 0, std: 0 };
+  const mean = arr.reduce((s, v) => s + v, 0) / n;
+  const varSum = arr.reduce((s, v) => s + (v - mean) * (v - mean), 0) / n;
+  const std = Math.sqrt(varSum);
+  return { mean, std };
+}
 // ==========================================
 // センサー処理 & フィルター制御
 // ==========================================
@@ -105,16 +112,20 @@ function handleMotion(e) {
   motionHistory.push({ time: now, val: mag });
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
-  let sum = 0;
-  motionHistory.forEach(item => sum += item.val);
-  const avgMag = sum / motionHistory.length || 0;
+  // --- 新: 過去履歴から平均と標準偏差を得る ---
+  const values = motionHistory.map(item => item.val);
+  const stats = computeMeanStd(values);
+  const meanMag = stats.mean;
+  const sdMag = stats.std;
+  const rawBPMFromMean = mapAccelToBPM(meanMag);
+  const alpha = 0.25; // EMAの追従速度。小さくするとより滑らか
+  smoothedBPM = smoothedBPM === 0 ? rawBPMFromMean : (alpha * rawBPMFromMean + (1 - alpha) * smoothedBPM);
 
-  smoothedBPM = mapAccelToBPM(avgMag);
-  
-  // ★ここでフィルターの開き具合を制御します
-  updateFilter(avgMag);
+  // フィルターを平均値に基づいて更新（瞬間値ではなく平均に従う）
+  updateFilter(meanMag);
 
-  if (!isPlaying && mag > 15) { 
+  // 再生開始判定も平均値を使う（短時間ノイズで誤って開始しにくい）
+  if (!isPlaying && meanMag > 12) {
     startSequence();
   }
 }
@@ -128,24 +139,15 @@ function mapAccelToBPM(a) {
 
 // フィルター制御関数
 function updateFilter(magnitude) {
-  // 揺れ(magnitude) 10(静止) 〜 30(激しい) を
-  // 周波数 200Hz(こもる) 〜 3000Hz(開く) にマッピング
-  
-  // 最小値と最大値の定義
-  const minFreq = 200;  // 完全にこもった音
-  const maxFreq = 3000; // 明るく開いた音
-  
-  // マッピング計算
+  // ...existing code...
   let targetFreq = 200 + (magnitude - 10) * 150;
-  
-  // 範囲制限
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
-
-  // rampToを使って滑らかに変化させる（0.1秒かけて変化）
   globalFilter.frequency.rampTo(targetFreq, 0.1);
 
-  document.getElementById("debug").innerText = 
+  // デバッグ表示に平均と標準偏差（sd）はhandleMotionで計算しているので
+  // smoothedBPM と合わせて表示
+  document.getElementById("debug").innerText =
     `Filter: ${Math.floor(targetFreq)}Hz (BPM: ${Math.floor(smoothedBPM)})`;
 }
 
