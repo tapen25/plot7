@@ -3,52 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Synth with Tone.js (Fixed)</title>
+<title>Motion Filter Synth</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
-  body { font-family: sans-serif; padding: 20px; text-align: center; }
-  button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; }
+  body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
+  button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; border: none; background: #333; color: white; border-radius: 8px; }
   #status, #debug { margin: 15px 0; font-size: 1.2em; }
   #debug { color: #666; font-size: 0.9em; }
+  .active { background: #e0f7fa; }
 </style>
 </head>
 <body>
 
 <button id="start">Start (iOSは要タップ)</button>
 <div id="status">停止中</div>
-<div id="debug">BPM: 0</div>
+<div id="debug">Filter: Closed</div>
 
 <script>
 // ==========================================
-// Tone.js シンセサイザー定義
+// 1. エフェクトとシンセの定義
 // ==========================================
-// 1. こもる（PolySynth）
-// 単なるSynthだと明るすぎる場合があるので、高音を少し削る設定にするとなお良し
+
+// ★ここが重要: 独立したフィルターを作る
+// frequency: 初期値は 200Hz (かなりこもった音)
+const globalFilter = new Tone.Filter({
+  type: "lowpass",
+  frequency: 200, 
+  Q: 1 // レゾナンス（少しクセをつける）
+}).toDestination();
+
+// PolySynthをフィルターに接続 (.connect(globalFilter))
 const polySynth = new Tone.PolySynth(Tone.Synth, {
-  oscillator: { type: "sine" }, // 三角波よりさらに丸いサイン波に変更
-  envelope: { attack: 0.05, decay: 0.1, sustain: 0.3, release: 1 }
-}).toDestination();
-
-// 2. 盛り上がり中間（MonoSynth）
-// ノコギリ波(sawtooth)にして、少しフィルターを開き気味に
-const monoSynth = new Tone.MonoSynth({
-  oscillator: { type: "sawtooth" },
-  filter: { Q: 2, type: "lowpass", rollover: -12, frequency: 800 }, // ほどよい太さ
-  envelope: { attack: 0.01, decay: 0.1, sustain: 0.6, release: 1 },
-  filterEnvelope: { attack: 0.01, decay: 0.5, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 4 },
-  volume: -4
-}).toDestination();
-
-// 3. 最大開放（FMSynth）
-// ModulationIndexを高めにしてギラギラさせる
-const fmSynth = new Tone.FMSynth({
-  harmonicity: 1.5, // 倍音の比率を変えてより金属的に
-  modulationIndex: 15, // 数値を上げるとより明るく歪む
-  oscillator: { type: "sine" },
-  modulation: { type: "sawtooth" }, // 変調側をノコギリ波にして激しく
-  envelope: { attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.5 }, // サスティン高めで音を残す
-  volume: -4
-}).toDestination();
+  oscillator: { 
+    type: "sawtooth" // ★重要: フィルターの効きが良いノコギリ波
+  },
+  envelope: { 
+    attack: 0.1, 
+    decay: 0.2, 
+    sustain: 0.5, 
+    release: 1 
+  },
+  volume: -5
+}).connect(globalFilter); // 出力先をフィルターへ
 
 // ==========================================
 // 変数・設定
@@ -68,45 +64,36 @@ const patterns = {
 
 const durations = [0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 1.0];
 
-function noteToFreq(note, offset = 0) {
+function noteToFreq(note) {
   const map = {
     G3: -14, A3: -12, B3: -10,
     C4: -9,  D4: -7,  E4: -5, F4: -4, G4: -2, A4: 0, B4: 2,
     C5: 3
   };
-  let semitone = map[note];
-  if (semitone === undefined) semitone = 0;
-  semitone += offset;
+  let semitone = map[note] || 0;
   return 440 * Math.pow(2, semitone/12);
 }
 
 // ==========================================
-// 開始処理（★ここを修正しました★）
+// 開始処理
 // ==========================================
 document.getElementById("start").onclick = async () => {
-  // 1. 先にセンサーの許可を求める (iOS対策)
   if (typeof DeviceMotionEvent.requestPermission === 'function') {
     try {
       const permissionState = await DeviceMotionEvent.requestPermission();
-      if (permissionState !== 'granted') {
-        alert("センサー許可が拒否されました");
-        return;
-      }
-    } catch (e) {
-      console.error(e);
-    }
+      if (permissionState !== 'granted') return alert("拒否されました");
+    } catch (e) { console.error(e); }
   }
 
-  // 2. その後にTone.jsを開始
   await Tone.start();
-  
   window.addEventListener("devicemotion", handleMotion);
-  document.getElementById("status").innerText = "センサー待機中...振ってください";
+  document.getElementById("status").innerText = "振ってフィルターを開放してください";
   document.getElementById("start").style.display = "none";
+  document.body.classList.add("active");
 };
 
 // ==========================================
-// センサー処理
+// センサー処理 & フィルター制御
 // ==========================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
@@ -124,9 +111,8 @@ function handleMotion(e) {
 
   smoothedBPM = mapAccelToBPM(avgMag);
   
-  const isHighSpeed = smoothedBPM >= 120;
-  document.getElementById("debug").innerText = 
-    `Avg BPM: ${Math.floor(smoothedBPM)} ${isHighSpeed ? "🔥HIGH (MonoSynth)" : ""}`;
+  // ★ここでフィルターの開き具合を制御します
+  updateFilter(avgMag);
 
   if (!isPlaying && mag > 15) { 
     startSequence();
@@ -134,10 +120,33 @@ function handleMotion(e) {
 }
 
 function mapAccelToBPM(a) {
-  let bpm = 100 + (a - 10) * 8; 
+  let bpm = 90 + (a - 10) * 5; 
   if (bpm < 60) bpm = 60;
-  if (bpm > 200) bpm = 200;
+  if (bpm > 180) bpm = 180;
   return bpm;
+}
+
+// フィルター制御関数
+function updateFilter(magnitude) {
+  // 揺れ(magnitude) 10(静止) 〜 30(激しい) を
+  // 周波数 200Hz(こもる) 〜 3000Hz(開く) にマッピング
+  
+  // 最小値と最大値の定義
+  const minFreq = 200;  // 完全にこもった音
+  const maxFreq = 3000; // 明るく開いた音
+  
+  // マッピング計算
+  let targetFreq = 200 + (magnitude - 10) * 150;
+  
+  // 範囲制限
+  if (targetFreq < minFreq) targetFreq = minFreq;
+  if (targetFreq > maxFreq) targetFreq = maxFreq;
+
+  // rampToを使って滑らかに変化させる（0.1秒かけて変化）
+  globalFilter.frequency.rampTo(targetFreq, 0.1);
+
+  document.getElementById("debug").innerText = 
+    `Filter: ${Math.floor(targetFreq)}Hz (BPM: ${Math.floor(smoothedBPM)})`;
 }
 
 // ==========================================
@@ -159,22 +168,19 @@ function playNextNote() {
 
   const noteName = currentPattern[currentNoteIndex];
   const durationVal = durations[currentNoteIndex];
-
+  
+  // テンポ計算
   const beatDuration = 60 / smoothedBPM; 
   const noteTimeLen = beatDuration * durationVal;
-
-  const isHighSpeed = smoothedBPM >= 120;
-  const pitchOffset = isHighSpeed ? 1 : 0;
-  const freq = noteToFreq(noteName, pitchOffset);
-
-  playSoundWithTone(freq, noteTimeLen, isHighSpeed);
   
-  let instrumentName = "PolySynth";
-  if (isHighSpeed) instrumentName = "MonoSynth";
-  else if (!usePatternA) instrumentName = "FMSynth";
+  // ★転調（pitchOffset）は削除しました
+  const freq = noteToFreq(noteName);
+
+  // 音を鳴らす（PolySynth固定）
+  polySynth.triggerAttackRelease(freq, noteTimeLen);
 
   document.getElementById("status").innerText = 
-    `再生中: ${usePatternA?"A":"B"} (${currentNoteIndex+1}/${currentPattern.length}) - ${instrumentName}`;
+    `再生中: ${usePatternA?"A":"B"} (${currentNoteIndex+1}/${currentPattern.length})`;
 
   setTimeout(() => {
     currentNoteIndex++;
@@ -182,28 +188,12 @@ function playNextNote() {
   }, noteTimeLen * 1000); 
 }
 
-function playSoundWithTone(freq, duration, isHighSpeed) {
-  let synthToUse;
-
-  // BPMに応じて3段階に切り替えるロジック
-  // 60〜100: Poly (こもる)
-  // 100〜140: Mono (太くなる)
-  // 140以上 : FM (派手に開ける)
-
-  if (smoothedBPM < 100) {
-    synthToUse = polySynth;      // 第一形態：静か
-  } else if (smoothedBPM < 140) {
-    synthToUse = monoSynth;      // 第二形態：力強い
-  } else {
-    synthToUse = fmSynth;        // 最終形態：覚醒
-  }
-  synthToUse.triggerAttackRelease(freq, duration);
-}
-
 function finishSequence() {
   isPlaying = false;
   usePatternA = !usePatternA; 
   document.getElementById("status").innerText = "待機中...";
+  // 演奏が終わったら少しフィルターを閉じる演出
+  globalFilter.frequency.rampTo(200, 2);
 }
 </script>
 
