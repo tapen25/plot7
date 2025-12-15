@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Synth with Tone.js (StdDev)</title>
+<title>Motion Synth with Tone.js</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; }
   button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; }
-  #status, #debug { margin: 15px 0; font-size: 1.1em; }
+  #status, #debug { margin: 15px 0; font-size: 1.2em; }
   #debug { color: #666; font-size: 0.9em; }
 </style>
 </head>
@@ -16,106 +16,122 @@
 
 <button id="start">Start (iOSは要タップ)</button>
 <div id="status">停止中</div>
-<div id="debug">std: 0 / BPM: 100</div>
+<div id="debug">BPM: 0</div>
 
 <script>
 // ==========================================
-// Tone.js シンセ定義
+// Tone.js シンセサイザー定義
 // ==========================================
+// 1. PolySynth: 標準的な柔らかい音（Pattern A用）
 const polySynth = new Tone.PolySynth(Tone.Synth, {
   oscillator: { type: "triangle" },
   envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 1 }
 }).toDestination();
 
+// 2. FMSynth: 金属的でキラキラした音（Pattern B用）
 const fmSynth = new Tone.FMSynth({
   harmonicity: 3,
   modulationIndex: 10,
   oscillator: { type: "sine" },
   envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.5 },
   modulation: { type: "square" },
+  volume: -5 // FMは音が大きくなりがちなので少し下げる
+}).toDestination();
+
+// 3. MonoSynth: アナログシンセ風の太い音（高速BPM用）
+const monoSynth = new Tone.MonoSynth({
+  oscillator: { type: "square" },
+  filter: { Q: 6, type: "lowpass", rollover: -12 },
+  envelope: { attack: 0.005, decay: 0.1, sustain: 0.9, release: 1 },
+  filterEnvelope: { attack: 0.06, decay: 0.2, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 7, exponent: 2 },
   volume: -6
 }).toDestination();
 
-const monoSynth = new Tone.MonoSynth({
-  oscillator: { type: "square" },
-  filter: { Q: 6, type: "lowpass" },
-  envelope: { attack: 0.005, decay: 0.1, sustain: 0.9, release: 1 },
-  filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.5, release: 2, baseFrequency: 200, octaves: 6 }
-}).toDestination();
 
 // ==========================================
-// 音楽データ
-// ==========================================
-const patterns = {
-  A: ["D4","C4","B3","D4","C4","A3","G3","A3","B3"],
-  B: ["D4","C4","B3","D4","C4","A3","G3","B3","G3"]
-};
-
-const durations = [0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,1.0];
-
-// ==========================================
-// 状態変数
+// 変数・設定
 // ==========================================
 let usePatternA = true;
-let isPlaying = false;
-let noteIndex = 0;
+let isPlaying = false; 
+let currentNoteIndex = 0; 
+let smoothedBPM = 60; 
 
+// 過去の加速度データ
 let motionHistory = [];
-const HISTORY_DURATION = 2000; // ms
+const HISTORY_DURATION = 2000; 
 
-let currentBPM = 100;
+// ノート定義
+const patterns = {
+  A: ["D4","C4","B3","D4", "C4","A3", "G3","A3", "B3"],
+  B: ["D4","C4","B3","D4", "C4","A3", "G3","B3", "G3"]
+};
+
+// リズム定義
+const durations = [0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0.5, 0.5, 1.0];
+
+// 音名→周波数変換
+function noteToFreq(note, offset = 0) {
+  const map = {
+    G3: -14, A3: -12, B3: -10,
+    C4: -9,  D4: -7,  E4: -5, F4: -4, G4: -2, A4: 0, B4: 2,
+    C5: 3
+  };
+  let semitone = map[note];
+  if (semitone === undefined) semitone = 0;
+  semitone += offset;
+  return 440 * Math.pow(2, semitone/12);
+}
 
 // ==========================================
-// Start
+// 開始処理
 // ==========================================
 document.getElementById("start").onclick = async () => {
+  // Tone.jsのオーディオコンテキストを開始
   await Tone.start();
-  if (typeof DeviceMotionEvent?.requestPermission === "function") {
+  
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
     await DeviceMotionEvent.requestPermission();
   }
+
   window.addEventListener("devicemotion", handleMotion);
-  document.getElementById("status").innerText = "センサー待機中...";
-  document.getElementById("start").style.display = "none";
+  document.getElementById("status").innerText = "センサー待機中...振ってください";
+  document.getElementById("start").style.display = "none"; // ボタンを隠す
 };
 
 // ==========================================
-// センサー処理（標準偏差）
+// センサー処理
 // ==========================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
   if (!acc) return;
 
   const mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-  const motion = Math.abs(mag - 9.8); // 重力除去
-
   const now = performance.now();
-  motionHistory.push({ time: now, val: motion });
-  motionHistory = motionHistory.filter(d => now - d.time < HISTORY_DURATION);
 
-  if (motionHistory.length < 5) return;
+  motionHistory.push({ time: now, val: mag });
+  motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
-  // --- 標準偏差 ---
-  const mean = motionHistory.reduce((s,d)=>s+d.val,0) / motionHistory.length;
-  const variance = motionHistory.reduce((s,d)=>s+(d.val-mean)**2,0) / motionHistory.length;
-  const std = Math.sqrt(variance);
+  let sum = 0;
+  motionHistory.forEach(item => sum += item.val);
+  const avgMag = sum / motionHistory.length || 0;
 
-  currentBPM = stdToBPM(std);
+  smoothedBPM = mapAccelToBPM(avgMag);
+  
+  const isHighSpeed = smoothedBPM >= 120;
+  document.getElementById("debug").innerText = 
+    `Avg BPM: ${Math.floor(smoothedBPM)} ${isHighSpeed ? "🔥HIGH (MonoSynth)" : ""}`;
 
-  document.getElementById("debug").innerText =
-    `std: ${std.toFixed(3)} / BPM: ${currentBPM}`;
-
-  if (!isPlaying && std > 0.15) startSequence();
+  // トリガー判定
+  if (!isPlaying && mag > 15) { 
+    startSequence();
+  }
 }
 
-// ==========================================
-// 標準偏差 → 段階BPM (100–120)
-// ==========================================
-function stdToBPM(std) {
-  if (std < 0.05) return 100;
-  if (std < 0.10) return 105;
-  if (std < 0.15) return 110;
-  if (std < 0.20) return 115;
-  return 120;
+function mapAccelToBPM(a) {
+  let bpm = 100 + (a - 10) * 8; 
+  if (bpm < 60) bpm = 60;
+  if (bpm > 200) bpm = 200;
+  return bpm;
 }
 
 // ==========================================
@@ -123,34 +139,77 @@ function stdToBPM(std) {
 // ==========================================
 function startSequence() {
   isPlaying = true;
-  noteIndex = 0;
-  playNext();
+  currentNoteIndex = 0;
+  playNextNote(); 
 }
 
-function playNext() {
-  const pattern = usePatternA ? patterns.A : patterns.B;
-  if (noteIndex >= pattern.length) return finish();
+function playNextNote() {
+  const currentPattern = usePatternA ? patterns.A : patterns.B;
+  
+  if (currentNoteIndex >= currentPattern.length) {
+    finishSequence();
+    return;
+  }
 
-  const note = pattern[noteIndex];
-  const dur = durations[noteIndex];
-  const sec = (60 / currentBPM) * dur;
+  const noteName = currentPattern[currentNoteIndex];
+  const durationVal = durations[currentNoteIndex];
 
-  const isHigh = currentBPM >= 115;
-  const synth = isHigh ? monoSynth : (usePatternA ? polySynth : fmSynth);
+  // BPMから長さを計算
+  const beatDuration = 60 / smoothedBPM; 
+  const noteTimeLen = beatDuration * durationVal;
 
-  synth.triggerAttackRelease(note, sec);
+  // BPM120以上でピッチ上げ
+  const isHighSpeed = smoothedBPM >= 120;
+  const pitchOffset = isHighSpeed ? 1 : 0;
+  const freq = noteToFreq(noteName, pitchOffset);
 
-  document.getElementById("status").innerText =
-    `再生中 Pattern ${usePatternA ? "A" : "B"} / BPM ${currentBPM}`;
+  // 音を鳴らす (Tone.jsを使用)
+  playSoundWithTone(freq, noteTimeLen, isHighSpeed);
+  
+  // 表示更新
+  let instrumentName = "PolySynth";
+  if (isHighSpeed) instrumentName = "MonoSynth";
+  else if (!usePatternA) instrumentName = "FMSynth";
 
-  setTimeout(() => { noteIndex++; playNext(); }, sec * 1000);
+  document.getElementById("status").innerText = 
+    `再生中: ${usePatternA?"A":"B"} (${currentNoteIndex+1}/${currentPattern.length}) - ${instrumentName}`;
+
+  // 次の音の予約
+  setTimeout(() => {
+    currentNoteIndex++;
+    playNextNote(); 
+  }, noteTimeLen * 1000); 
 }
 
-function finish() {
+// ==========================================
+// Tone.js 再生関数 ★ここが重要
+// ==========================================
+function playSoundWithTone(freq, duration, isHighSpeed) {
+  let synthToUse;
+
+  // 条件分岐で楽器（シンセ）を切り替える
+  if (isHighSpeed) {
+    // 高速時は MonoSynth (アグレッシブ)
+    synthToUse = monoSynth;
+  } else if (usePatternA) {
+    // パターンAは PolySynth (ソフト)
+    synthToUse = polySynth;
+  } else {
+    // パターンBは FMSynth (きらびやか)
+    synthToUse = fmSynth;
+  }
+
+  // triggerAttackRelease(周波数, 長さ) で発音
+  // Tone.jsは秒数指定で自動でエンベロープ処理をしてくれます
+  synthToUse.triggerAttackRelease(freq, duration);
+}
+
+function finishSequence() {
   isPlaying = false;
-  usePatternA = !usePatternA;
-  document.getElementById("status").innerText = "待機中";
+  usePatternA = !usePatternA; 
+  document.getElementById("status").innerText = "待機中...";
 }
 </script>
+
 </body>
 </html>
