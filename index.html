@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion Synth (Std Dev Control)</title>
+<title>Subtle Motion Synth</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -44,7 +44,6 @@ let currentNoteIndex = 0;
 let smoothedBPM = 100; // 初期BPM 100
 
 let motionHistory = [];
-// 標準偏差をきれいに出すため、履歴を少し短く調整（直近の揺れを見る）
 const HISTORY_DURATION = 1500; 
 
 const patterns = {
@@ -100,48 +99,40 @@ function handleMotion(e) {
   motionHistory.push({ time: now, val: mag });
   motionHistory = motionHistory.filter(item => now - item.time < HISTORY_DURATION);
 
-  // 統計量を計算（平均と標準偏差）
   const stats = computeMeanStd(motionHistory.map(item => item.val));
-  
-  // ★ここがポイント: 平均(mean)ではなく、標準偏差(std)を使います
-  // stdは「静止していればほぼ0」「揺らすと大きくなる」値です。重力の影響を受けません。
   const intensity = stats.std; 
 
-  // ノイズゲート（微細な手の震えを無視）
   const cleanIntensity = intensity < 0.8 ? 0 : intensity;
 
-  // BPM計算 (標準偏差ベース)
+  // BPM計算 (標準偏差ベース 100-130)
   const rawBPM = mapStdToBPM(cleanIntensity);
-  const alpha = 0.1; // 変化をさらになめらかに
+  const alpha = 0.1; 
   smoothedBPM = smoothedBPM === 0 ? rawBPM : (alpha * rawBPM + (1 - alpha) * smoothedBPM);
 
-  // フィルター計算 (標準偏差ベース)
+  // フィルター計算
   updateFilter(cleanIntensity);
 
-  // トリガー（再生開始）は引き続き「瞬間の衝撃」で判定
+  // トリガー（瞬間値判定）
   if (!isPlaying && mag > 13.0) {
     startSequence();
   }
 }
 
-// ★標準偏差(std)をBPM(100-130)に変換
 function mapStdToBPM(std) {
-  // stdが 0 のとき 100
-  // stdが 6 くらいのとき 130 (激しく振ったとき)
   let bpm = 100 + (std * 5); 
-  
   if (bpm < 100) bpm = 100;
   if (bpm > 130) bpm = 130;
   return bpm;
 }
 
-// ★標準偏差(std)をフィルター周波数に変換
+// ★ここを「ごく微妙な変化」に調整
 function updateFilter(std) {
   const minFreq = 200;  
-  const maxFreq = 4000; // 少し上限を上げました（抜けを良くするため）
+  const maxFreq = 800; // 上限を大幅に下げました（以前は4000）
   
-  // std * 400 なので、std=0で200Hz, std=5で2200Hz, std=10で4200Hz
-  let targetFreq = 200 + (std * 400); 
+  // 係数を大幅ダウン (以前は * 400)
+  // 激しく振っても 200 + (10*50) = 700Hz くらいにしかなりません
+  let targetFreq = 200 + (std * 50); 
 
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
