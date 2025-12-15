@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Slow Motion Synth (90-120)</title>
+<title>Heavy Weight Synth (5s Lag)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <style>
   body { font-family: sans-serif; padding: 20px; text-align: center; background: #f0f0f0; transition: background 0.5s; }
@@ -17,7 +17,7 @@
 
 <button id="start">Start (iOSは要タップ)</button>
 <div id="status">停止中</div>
-<div id="debug">Filter: Closed / Drum: Off</div>
+<div id="debug">Wait...</div>
 
 <script>
 // ==========================================
@@ -46,18 +46,20 @@ let usePatternA = true;
 let isPlaying = false; 
 let currentNoteIndex = 0; 
 
-// ★変更点1: 初期BPMを90に設定
-let smoothedBPM = 90; 
+// ★重要: 現在のBPMと、目指すべきBPMを分けます
+let currentBPM = 90; 
+let targetBPM = 90; 
 
 let motionHistory = [];
 const HISTORY_DURATION = 1500; 
+// ★変化にかける時間（秒）
+const RAMP_TIME = 5; 
 
 const patterns = {
   A: ["C4","E4","G4","A4", "G4","A4", "G4","F4", "E4"],
   B: ["G4","E4","D4","C4", "D4","C4", "D4","E4", "C4"]
 };
 
-// リズム譜
 const durations = [0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 1.0];
 const kickIndices = [0, 2, 4, 8]; 
 
@@ -80,6 +82,10 @@ document.getElementById("start").onclick = async () => {
   }
   await Tone.start();
   window.addEventListener("devicemotion", handleMotion);
+  
+  // BPMを滑らかに更新するためのループを開始
+  setInterval(updateBPM, 100); 
+
   document.getElementById("status").innerText = "振ってフィルターを開放してください";
   document.getElementById("start").style.display = "none";
   document.body.classList.add("active");
@@ -95,7 +101,7 @@ function computeMeanStd(arr) {
 }
 
 // ==========================================
-// センサー処理 & パラメータ制御
+// センサー処理（目標値の決定）
 // ==========================================
 function handleMotion(e) {
   const acc = e.accelerationIncludingGravity;
@@ -111,60 +117,72 @@ function handleMotion(e) {
   const intensity = stats.std; 
   const cleanIntensity = intensity < 0.8 ? 0 : intensity;
 
-  // BPM計算
-  const rawBPM = mapStdToBPM(cleanIntensity);
+  // 1. まず「目標値（Target）」を計算します
+  const calculatedTargetBPM = mapStdToBPM(cleanIntensity);
   
-  // ★変更点2: alphaを0.03に設定（非常にゆっくり追従する）
-  // 値が小さいほど「じわじわ」変化します (0.01〜0.1の範囲推奨)
-  const alpha = 0.03; 
-  smoothedBPM = smoothedBPM === 0 ? rawBPM : (alpha * rawBPM + (1 - alpha) * smoothedBPM);
+  // 目標値をセット（即時反映せず、グローバル変数に入れるだけ）
+  targetBPM = calculatedTargetBPM;
 
-  updateFilter(cleanIntensity);
-  updateLayerVolume(cleanIntensity);
+  // 2. フィルターとボリュームはTone.jsのrampToで「5秒かけて」移動させます
+  updateFilterAndVol(cleanIntensity);
 
+  // 3. 再生トリガー（ここは瞬発力が欲しいのでmagで即判定）
   if (!isPlaying && mag > 13.0) {
     startSequence();
   }
 }
 
-// ★変更点3: 90〜120の範囲にマッピング
-function mapStdToBPM(std) {
-  // 係数を 4 に設定。
-  // std=0 -> 90 BPM
-  // std=7.5 -> 120 BPM
-  let bpm = 90 + (std * 4); 
+// ==========================================
+// ゆっくり変化させる処理
+// ==========================================
+
+// ★BPMを徐々に目標値に近づける関数
+function updateBPM() {
+  if (!isPlaying) return;
+
+  // 現在値と目標値の差分
+  const diff = targetBPM - currentBPM;
   
+  // 5秒(5000ms)かけて追いつくようなステップ幅
+  // setIntervalが100msごとなので、係数は緩めに設定
+  // 差分の 2% ずつ近づく (非常にゆっくり)
+  const step = diff * 0.02; 
+  
+  currentBPM += step;
+
+  // デバッグ表示
+  document.getElementById("debug").innerText =
+    `Target: ${Math.floor(targetBPM)} / Cur: ${Math.floor(currentBPM)}`;
+}
+
+function mapStdToBPM(std) {
+  let bpm = 90 + (std * 4); 
   if (bpm < 90) bpm = 90;
   if (bpm > 120) bpm = 120;
   return bpm;
 }
 
-function updateFilter(std) {
+function updateFilterAndVol(std) {
+  // --- フィルター目標値 ---
   const minFreq = 200;  
   const maxFreq = 800; 
   let targetFreq = 200 + (std * 50); 
   if (targetFreq < minFreq) targetFreq = minFreq;
   if (targetFreq > maxFreq) targetFreq = maxFreq;
   
-  // ★変更点4: 変化時間を1.0秒に設定
-  // これによりフィルターの開閉がよりぬるっとなります
-  globalFilter.frequency.rampTo(targetFreq, 1.0);
-}
+  // ★重要: RAMP_TIME(5秒)かけて変化させる
+  // これにより、一瞬ターゲットが跳ね上がっても、実際の周波数はゆっくりしか上がりません
+  globalFilter.frequency.rampTo(targetFreq, RAMP_TIME);
 
-function updateLayerVolume(std) {
+  // --- キック音量目標値 ---
   let targetVol = -100; 
-
   if (std > 2.0) {
-    // キック音量も少し控えめに (-20dB上限)
     targetVol = -40 + (std - 2) * 4; 
     if (targetVol > -20) targetVol = -20; 
   }
-  // 音量変化もゆっくり (1秒)
-  kickSynth.volume.rampTo(targetVol, 1.0);
-
-  const volStr = targetVol <= -90 ? "Off" : Math.floor(targetVol) + "dB";
-  document.getElementById("debug").innerText =
-    `Std: ${std.toFixed(1)} / BPM: ${Math.floor(smoothedBPM)} / Kick: ${volStr}`;
+  
+  // こちらも5秒かけて変化
+  kickSynth.volume.rampTo(targetVol, RAMP_TIME);
 }
 
 // ==========================================
@@ -173,6 +191,7 @@ function updateLayerVolume(std) {
 function startSequence() {
   isPlaying = true;
   currentNoteIndex = 0;
+  // 再生開始時は、現在値をリセットせず、今の状態からスタート
   playNextNote(); 
 }
 
@@ -187,7 +206,8 @@ function playNextNote() {
   const noteName = currentPattern[currentNoteIndex];
   const durationVal = durations[currentNoteIndex];
   
-  const beatDuration = 60 / smoothedBPM; 
+  // 計算された「現在のゆっくり変化するBPM」を使用
+  const beatDuration = 60 / currentBPM; 
   const noteTimeLen = beatDuration * durationVal;
   
   const freq = noteToFreq(noteName);
@@ -210,8 +230,12 @@ function finishSequence() {
   isPlaying = false;
   usePatternA = !usePatternA; 
   document.getElementById("status").innerText = "待機中...";
-  globalFilter.frequency.rampTo(200, 2);
-  kickSynth.volume.rampTo(-100, 2); 
+  
+  // 停止時もゆっくり戻る
+  globalFilter.frequency.rampTo(200, 5);
+  kickSynth.volume.rampTo(-100, 5); 
+  // BPMのtargetも戻しておく（次回の開始時のため）
+  targetBPM = 90;
 }
 </script>
 
